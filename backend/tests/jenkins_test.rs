@@ -1,4 +1,6 @@
 use base64::Engine;
+use devops_agent::config::Config;
+use devops_agent::tools::jenkins;
 use reqwest::Client;
 use std::env;
 
@@ -10,7 +12,10 @@ fn init_env() {
 
 /// 获取 Jenkins 配置
 fn get_jenkins_config() -> (String, String, String) {
-    let url = env::var("JENKINS_URL").expect("JENKINS_URL not set");
+    let url = env::var("JENKINS_URL")
+        .expect("JENKINS_URL not set")
+        .trim_end_matches('/')
+        .to_string();
     let user = env::var("JENKINS_USER").expect("JENKINS_USER not set");
     let token = env::var("JENKINS_TOKEN").expect("JENKINS_TOKEN not set");
     (url, user, token)
@@ -101,51 +106,53 @@ async fn test_trigger_ds_pkg_dev_build() {
     let client = Client::new();
     let auth = build_auth_header(&user, &token);
 
-    // 触发构建（Jenkins 需要 POST 空表单）
-    let response = client
-        .post(&format!("{}/job/ds-pkg/job/dev/build", url))
+    // 获取本地缓存的 jenkins-cli.jar
+    let config = Config::from_env();
+    let cli_jar = jenkins::get_cli_jar(&config).await.expect("Failed to get jenkins-cli.jar");
+    println!("Using jenkins-cli.jar: {}", cli_jar);
+
+    // 使用 Jenkins CLI 触发构建（Tomcat 7.0.75 POST bug workaround）
+    let cli_output = std::process::Command::new("java")
+        .arg("-jar")
+        .arg(&cli_jar)
+        .arg("-s")
+        .arg(&url)
+        .arg("-auth")
+        .arg(format!("{}:{}", user, token))
+        .arg("build")
+        .arg("ds-pkg/dev")
+        .output()
+        .expect("Failed to execute Jenkins CLI");
+
+    if !cli_output.status.success() {
+        let stderr = String::from_utf8_lossy(&cli_output.stderr);
+        panic!("Jenkins CLI build failed: {}", stderr.trim());
+    }
+
+    println!("Jenkins CLI triggered build successfully");
+
+    // 通过 HTTP API GET 获取最新构建号
+    let status_response = client
+        .get(&format!("{}/job/ds-pkg/job/dev/api/json?fields=lastBuild", url))
         .header("Authorization", &auth)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body("")
         .send()
         .await
-        .expect("Failed to trigger build");
+        .expect("Failed to get latest build info");
 
-    assert!(
-        response.status().is_success(),
-        "Build trigger failed: {}",
-        response.text().await.unwrap()
-    );
+    assert!(status_response.status().is_success(), "Failed to get build info");
+    let body: serde_json::Value = status_response.json().await.unwrap();
+    let build_num = body
+        .get("lastBuild")
+        .and_then(|b| b.get("number"))
+        .and_then(|n| n.as_u64())
+        .map(|n| n as u32)
+        .expect("No lastBuild found");
 
-    // 获取 Location header 来提取构建号
-    let location = response
-        .headers()
-        .get("Location")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    println!("Build triggered. Location: {}", location);
-
-    // 从 URL 中提取构建号
-    // 例如: http://host/jenkins/job/ds-pkg/job/dev/123/
-    let build_number = location
-        .split('/')
-        .filter(|s| s.parse::<u32>().is_ok())
-        .next()
-        .and_then(|s| s.parse::<u32>().ok());
-
-    assert!(
-        build_number.is_some(),
-        "Could not extract build number from location: {}",
-        location
-    );
-
-    let build_num = build_number.unwrap();
     println!("Build #{} triggered successfully", build_num);
 
-    // 等待构建完成（最多 10 分钟）
-    let max_wait = 600u64;
-    let poll_interval = 10u64;
+    // 等待构建完成（最多 3 分钟 5s一轮）
+    let max_wait = 180u64;
+    let poll_interval = 5u64;
     let mut elapsed = 0u64;
 
     while elapsed < max_wait {
@@ -172,8 +179,9 @@ async fn test_trigger_ds_pkg_dev_build() {
             build_num, elapsed, in_progress, result
         );
 
-        if !in_progress {
-            // 构建完成
+        // 构建完成条件：inProgress 为 false 或 result 有值
+        let completed = !in_progress || result.is_some();
+        if completed {
             if let Some(r) = result {
                 println!("Build #{} completed with result: {}", build_num, r);
                 assert!(

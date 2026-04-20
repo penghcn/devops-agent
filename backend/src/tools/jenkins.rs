@@ -1,6 +1,6 @@
 use base64::Engine;
 use reqwest::{Client, header::{HeaderMap, HeaderValue, AUTHORIZATION}};
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, Context};
 use crate::config::Config;
 
 /// 校验 Jenkins Job 名称，防止路径注入
@@ -98,6 +98,8 @@ pub async fn get_job_status(job_name: &str, config: &Config) -> Result<serde_jso
 
 /// 触发 Pipeline 多分支构建
 ///
+/// 策略：先尝试 HTTP API，若失败（如 Tomcat POST bug 返回 400）则 fallback 到 Jenkins CLI。
+///
 /// Jenkins Pipeline 多分支的 URL 模式:
 /// /job/{job_name}/job/{branch}/build  — 触发指定分支构建
 /// /job/{job_name}/build              — 触发默认分支构建
@@ -107,7 +109,16 @@ pub async fn trigger_pipeline(
     config: &Config,
 ) -> Result<String> {
     let job_name = sanitize_job_name(job_name)?;
-    let client = Client::new();
+
+    // 策略 1: 先尝试 HTTP API 触发
+    let http_job_path = match branch {
+        Some(b) => {
+            let b = sanitize_job_name(b)?;
+            format!("{}/{}", job_name, b)
+        }
+        None => job_name.to_string(),
+    };
+    let http_url = format!("{}/job/{}/build", config.jenkins_url, http_job_path);
 
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
@@ -117,34 +128,179 @@ pub async fn trigger_pipeline(
         HeaderValue::from_str(&format!("Basic {}", encoded))?,
     );
 
-    // 构建 URL
-    let url = match branch {
-        Some(b) => {
-            let b = sanitize_job_name(b)?;
-            format!("{}/job/{}/job/{}/build", config.jenkins_url, job_name, b)
-        }
-        None => format!("{}/job/{}/build", config.jenkins_url, job_name),
-    };
-
-    tracing::info!("Triggering pipeline: {}", url);
-
-    let response = client
-        .post(&url)
+    let client = Client::new();
+    let trigger_result = client
+        .post(&http_url)
         .headers(headers)
         .body("")
         .send()
+        .await;
+
+    match trigger_result {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::info!("Pipeline triggered via HTTP API: {}", job_name);
+            let build_num = get_latest_build_number(job_name, branch, config).await?;
+            let branch_str = branch.unwrap_or("");
+            let url = format!(
+                "{}/job/{}/job/{}/{}",
+                config.jenkins_url, job_name, branch_str, build_num
+            );
+            return Ok(format!("Pipeline triggered successfully. Build URL: {}", url));
+        }
+        Ok(resp) => {
+            tracing::warn!(
+                "HTTP API trigger failed ({}), falling back to Jenkins CLI",
+                resp.status()
+            );
+        }
+        Err(e) => {
+            tracing::warn!("HTTP API trigger error ({:?}), falling back to Jenkins CLI", e);
+        }
+    }
+
+    // 策略 2: HTTP API 失败，使用 Jenkins CLI fallback
+    let job_path = match branch {
+        Some(b) => format!("{}/{}", job_name, sanitize_job_name(b)?),
+        None => job_name.to_string(),
+    };
+
+    tracing::info!("Triggering pipeline via Jenkins CLI fallback: {}", job_path);
+
+    let cli_jar = get_cli_jar(config).await?;
+    let auth_owned = format!("{}:{}", config.jenkins_user, config.jenkins_token);
+    let url_owned = config.jenkins_url.clone();
+    let job_path_owned = job_path.clone();
+    let cli_jar_owned = cli_jar.clone();
+
+    let cli_output = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("java")
+            .arg("-jar")
+            .arg(&cli_jar_owned)
+            .arg("-s")
+            .arg(&url_owned)
+            .arg("-auth")
+            .arg(&auth_owned)
+            .arg("build")
+            .arg(&job_path_owned)
+            .output()
+    })
+    .await?
+    .context("Failed to execute Jenkins CLI")?;
+
+    if !cli_output.status.success() {
+        let stderr = String::from_utf8_lossy(&cli_output.stderr);
+        anyhow::bail!("Jenkins CLI build failed: {}", stderr.trim());
+    }
+
+    tracing::info!("Pipeline triggered via Jenkins CLI fallback: {}", job_path);
+
+    // CLI 触发成功后，通过 HTTP API 获取最新构建号
+    let build_num = get_latest_build_number(job_name, branch, config).await?;
+
+    let branch_str = branch.unwrap_or("");
+    let url = format!(
+        "{}/job/{}/job/{}/{}",
+        config.jenkins_url, job_name, branch_str, build_num
+    );
+
+    Ok(format!("Pipeline triggered successfully. Build URL: {}", url))
+}
+
+/// 下载/缓存 jenkins-cli.jar
+fn get_cli_cache_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".cache/jenkins-cli.jar")
+}
+
+/// 获取/下载 jenkins-cli.jar 缓存路径
+///
+/// 如果本地缓存不存在，则从 Jenkins HTTP API 下载。
+pub async fn get_cli_jar(config: &Config) -> Result<String> {
+    let cache_path = get_cli_cache_path();
+
+    if cache_path.exists() {
+        return Ok(cache_path.to_string_lossy().to_string());
+    }
+
+    // 创建缓存目录
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).context("Failed to create jenkins-cli cache directory")?;
+    }
+
+    let jar_url = format!("{}/jnlpJars/jenkins-cli.jar", config.jenkins_url);
+    tracing::info!("Downloading jenkins-cli.jar from: {}", jar_url);
+
+    let client = Client::new();
+    let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Basic {}", encoded))?,
+    );
+
+    let response = client
+        .get(&jar_url)
+        .headers(headers)
+        .send()
         .await?;
 
-    if response.status().is_success() {
-        let location = response
-            .headers()
-            .get("Location")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        Ok(format!("Pipeline triggered successfully. Build URL: {}", location))
-    } else {
-        anyhow::bail!("Failed to trigger pipeline: {} ({})", response.status(), response.text().await?)
+    if !response.status().is_success() {
+        anyhow::bail!("Failed to download jenkins-cli.jar: {}", response.status());
     }
+
+    let bytes = response.bytes().await?;
+    std::fs::write(&cache_path, &bytes).context("Failed to write jenkins-cli.jar to cache")?;
+
+    tracing::info!("jenkins-cli.jar downloaded to: {}", cache_path.display());
+    Ok(cache_path.to_string_lossy().to_string())
+}
+
+/// 获取最新构建号（通过 HTTP API GET，不受 POST bug 影响）
+async fn get_latest_build_number(
+    job_name: &str,
+    branch: Option<&str>,
+    config: &Config,
+) -> Result<u32> {
+    let client = Client::new();
+    let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Basic {}", encoded))?,
+    );
+
+    let url = match branch {
+        Some(b) => format!(
+            "{}/job/{}/job/{}/api/json?fields=lastBuild",
+            config.jenkins_url, job_name, b
+        ),
+        None => format!(
+            "{}/job/{}/api/json?fields=lastBuild",
+            config.jenkins_url, job_name
+        ),
+    };
+
+    let response = client
+        .get(&url)
+        .headers(headers)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("Failed to get latest build number: {}", response.status());
+    }
+
+    let body: serde_json::Value = response.json().await?;
+    let build_num = body
+        .get("lastBuild")
+        .and_then(|b| b.get("number"))
+        .and_then(|n| n.as_u64())
+        .map(|n| n as u32)
+        .context("No lastBuild found")?;
+
+    Ok(build_num)
 }
 
 /// 查询 Pipeline 构建状态
@@ -231,4 +387,42 @@ pub async fn wait_for_pipeline(
     }
 
     anyhow::bail!("Pipeline #{} did not complete within {} seconds", build_number, max_wait_secs)
+}
+
+/// 获取指定构建的 console 日志
+pub async fn get_build_log(
+    job_name: &str,
+    branch: &str,
+    build_number: u32,
+    config: &Config,
+) -> Result<String> {
+    let job_name = sanitize_job_name(job_name)?;
+    let branch = sanitize_job_name(branch)?;
+    let client = Client::new();
+
+    let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Basic {}", encoded))?,
+    );
+
+    let url = format!(
+        "{}/job/{}/job/{}/{}/consoleText",
+        config.jenkins_url, job_name, branch, build_number
+    );
+
+    let response = client
+        .get(&url)
+        .headers(headers)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let log = response.text().await?;
+        Ok(log)
+    } else {
+        anyhow::bail!("Failed to get build log: {} ({})", response.status(), response.text().await?)
+    }
 }

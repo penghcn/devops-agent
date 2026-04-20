@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -65,12 +63,10 @@ impl StepContext {
 }
 
 /// Step trait — 所有工具调用必须实现此 trait
+#[async_trait::async_trait]
 pub trait Step: Send + Sync {
     fn name(&self) -> &str;
-    fn execute<'a>(
-        &'a self,
-        ctx: &'a mut StepContext,
-    ) -> Pin<Box<dyn Future<Output = StepResult> + Send + 'a>>;
+    async fn execute(&self, ctx: &mut StepContext) -> StepResult;
 }
 
 /// StepChain — 编排器，顺序执行 Step
