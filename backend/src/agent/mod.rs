@@ -1,3 +1,9 @@
+mod step;
+mod steps;
+mod router;
+
+pub use step::{Step, StepContext, StepResult, StepChain};
+
 mod claude;
 
 use serde::{Deserialize, Serialize};
@@ -34,7 +40,7 @@ pub struct AgentResponse {
     pub steps: Vec<AgentStep>,  // 展示思考过程
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AgentStep {
     pub action: String,
     pub result: String,
