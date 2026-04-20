@@ -1,7 +1,3 @@
-mod config;
-mod agent;
-mod tools;
-
 use axum::{
     extract::State,
     routing::post,
@@ -12,10 +8,11 @@ use axum::{
 use axum::serve;
 use tower_http::cors::{CorsLayer, Any};
 use std::sync::Arc;
+use devops_agent;
 
 #[derive(Clone)]
 struct AppState {
-    config: config::Config,
+    config: devops_agent::config::Config,
 }
 
 #[tokio::main]
@@ -28,7 +25,7 @@ async fn main() {
         .init();
     
     // 加载配置
-    let config = config::Config::from_env();
+    let config = devops_agent::config::Config::from_env();
     let state = Arc::new(AppState { config });
     
     // 构建路由
@@ -55,8 +52,8 @@ async fn main() {
 
 async fn handle_agent(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<agent::AgentRequest>,
+    Json(req): Json<devops_agent::agent::AgentRequest>,
 ) -> impl IntoResponse {
-    let response = agent::process_request(req, &state.config).await;
+    let response = devops_agent::agent::process_request(req, &state.config).await;
     Json(response)
 }

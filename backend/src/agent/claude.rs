@@ -1,4 +1,4 @@
-use std::process::{Command, Output};
+use std::process::Command;
 use anyhow::{Result, Context};
 
 /// 调用 Claude Code 执行任务
@@ -16,12 +16,12 @@ pub async fn call_claude_code(prompt: &str, allowed_tools: &str) -> Result<Strin
     let tools_owned = allowed_tools.to_string();
     
     let output = tokio::task::spawn_blocking(move || {
-        Command::new("claude")
-            .arg("--print")              // 非交互模式，直接输出结果
-            .arg("--allowedTools")
-            .arg(tools_owned)
-            .arg(prompt_owned)
-            .output()
+        let mut cmd = Command::new("claude");
+        cmd.arg("--print").arg(&prompt_owned);
+        if !tools_owned.is_empty() {
+            cmd.arg("--allowedTools").arg(&tools_owned);
+        }
+        cmd.output()
     })
     .await
     .context("Failed to spawn Claude Code process")?
