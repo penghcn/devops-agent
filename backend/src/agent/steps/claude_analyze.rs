@@ -4,9 +4,7 @@ use super::super::step::{Step, StepContext, StepResult};
 pub struct ClaudeAnalyzeStep;
 
 impl Default for ClaudeAnalyzeStep {
-    fn default() -> Self {
-        Self
-    }
+    fn default() -> Self { Self }
 }
 
 #[async_trait::async_trait]
