@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    routing::post,
+    routing::{get, post},
     Router,
     Json,
     response::IntoResponse,
@@ -8,32 +8,61 @@ use axum::{
 use axum::serve;
 use tower_http::cors::{CorsLayer, Any};
 use std::sync::Arc;
+
 use devops_agent;
+use devops_agent::tools::jenkins_cache::{JenkinsCacheManager, JenkinsCache};
 
 #[derive(Clone)]
 struct AppState {
     config: devops_agent::config::Config,
+    cache_manager: Arc<JenkinsCacheManager>,
 }
 
 #[tokio::main]
 async fn main() {
     // 初始化日志（使用本地时区）
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_ansi(false)
-        .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
-        .init();
-    
+    if let Err(e) = yunli::setup_logger_debug() {
+        tracing::error!("Init log error: {}", e);
+    }
+
     // 加载配置
     let config = devops_agent::config::Config::from_env();
-    let state = Arc::new(AppState { config });
-    
+    let cache_manager = Arc::new(JenkinsCacheManager::new(config.clone()));
+
+    // 启动时异步加载缓存
+    let cache_clone = cache_manager.clone();
+    tokio::spawn(async move {
+        match cache_clone.refresh().await {
+            Ok(()) => tracing::info!("Jenkins cache loaded successfully"),
+            Err(e) => tracing::error!("Failed to load Jenkins cache: {}", e),
+        }
+    });
+
+    // 每分钟刷新缓存
+    let cache_refresh = cache_manager.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            match cache_refresh.refresh().await {
+                Ok(()) => tracing::info!("Jenkins cache refreshed"),
+                Err(e) => tracing::warn!("Jenkins cache refresh failed: {}", e),
+            }
+        }
+    });
+
+    let state = Arc::new(AppState {
+        config,
+        cache_manager,
+    });
+
     // 构建路由
     let app = Router::new()
         .route("/api/agent", post(handle_agent))
+        .route("/api/cache", get(handle_cache))
         .layer(CorsLayer::new().allow_origin(Any))
         .with_state(state);
-    
+
     tracing::info!("Server running on http://localhost:3000");
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:3000").await {
         Ok(l) => l,
@@ -54,6 +83,19 @@ async fn handle_agent(
     State(state): State<Arc<AppState>>,
     Json(req): Json<devops_agent::agent::AgentRequest>,
 ) -> impl IntoResponse {
-    let response = devops_agent::agent::process_request(req, &state.config).await;
+    let response = devops_agent::agent::process_request(req, &state.config, state.cache_manager.clone()).await;
     Json(response)
+}
+
+async fn handle_cache(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let cache = state.cache_manager.get_cached().await;
+    match cache {
+        Some(c) => Json(c),
+        None => Json(JenkinsCache {
+            jobs: vec![],
+            last_refresh: "未加载".to_string(),
+        }),
+    }
 }

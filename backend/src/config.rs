@@ -15,7 +15,7 @@ impl Config {
     pub fn from_env() -> Self {
         dotenv().ok();
         Self {
-            jenkins_url: env::var("JENKINS_URL").expect("JENKINS_URL not set"),
+            jenkins_url: env::var("JENKINS_URL").expect("JENKINS_URL not set").trim_end_matches('/').to_string(),
             jenkins_user: env::var("JENKINS_USER").expect("JENKINS_USER not set"),
             jenkins_token: env::var("JENKINS_TOKEN").expect("JENKINS_TOKEN not set"),
             gitlab_url: env::var("GITLAB_URL").unwrap_or_else(|_| "https://gitlab.com".to_string()),

@@ -27,14 +27,9 @@ impl Step for JenkinsLogStep {
 
         match jenkins::get_build_log(&job_name, &branch, build_number, &ctx.config).await {
             Ok(log) => {
-                let truncated = if log.len() > 5000 {
-                    format!("{}...[日志已截断，共 {} 字符]", &log[..5000], log.len())
-                } else {
-                    log
-                };
-                ctx.build_log = Some(truncated.clone());
+                ctx.build_log = Some(log.clone());
                 StepResult::Success {
-                    message: format!("获取日志成功 ({} 字符)", truncated.len()),
+                    message: format!("获取日志成功 ({} 字符)", log.len()),
                 }
             }
             Err(e) => StepResult::Failed { error: e.to_string() },

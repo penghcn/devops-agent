@@ -48,7 +48,7 @@ claude-devops-agent/
 ```
 # 1. 启动 Rust 后端
 cd backend
-cargo run
+./run-signed.sh
 
 # 2. 启动前端（另一个终端）
 cd frontend
@@ -57,3 +57,6 @@ bun run dev
 
 # 3. 访问 http://localhost:5173
 ```
+## 效果图
+[预检失败](./images/jda1.png)
+[构建成功](./images/jda2.png)

@@ -9,7 +9,7 @@ pub struct JenkinsWaitStep {
 impl Default for JenkinsWaitStep {
     fn default() -> Self {
         Self {
-            poll_interval_secs: 10,
+            poll_interval_secs: 1,
             max_wait_secs: 1800,
         }
     }

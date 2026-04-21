@@ -1,0 +1,48 @@
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*.local
+.env.*.local.example
+
+# Rust build artifacts
+backend/target/
+
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# Bun lockfile (use bun.lockb instead)
+bun.lock
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+
+# Claude Code
+.claude/
+
+# Plans (internal temporary files)
+plans/
+
+# Secret / key files
+*.pem
+*.key
+*.p12
+*.crt
+*.pfx
+credentials.json
+*.secret
+
+# IDE / editor
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+*.iml
+
+# OS generated
+Thumbs.db
