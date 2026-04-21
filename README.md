@@ -17,32 +17,50 @@
 
 ## 架构
 ```
-claude-devops-agent/
-├── frontend/      # BUN + TS + Vite + Vue 3 + tailwindcss 前端
+devops-agent/
+├── frontend/                  # BUN + TS + Vite + Vue 3 + TailwindCSS 前端
 │   ├── src/
-│   │   ├── App.vue
-│   │   ├── components/
-│   │   │   ├── ChatWindow.vue
-│   │   │   └── ConfigPanel.vue
-│   │   └── api/
-│   │       └── agent.ts
-│   └── package.json
-├── backend/                  # Rust 后端
+│   │   ├── App.vue            # 主应用组件
+│   │   ├── main.ts            # 入口
+│   │   ├── types.ts           # 类型定义
+│   │   ├── api/
+│   │   │   └── agent.ts       # Agent API 调用
+│   │   └── components/
+│   │       └── StructuredResponse.vue  # 结构化响应展示
+│   └── vite.config.ts
+├── backend/                   # Rust + Axum 后端
 │   ├── src/
-│   │   ├── main.rs           # Axum Web 服务入口
+│   │   ├── main.rs            # Axum Web 服务入口
+│   │   ├── lib.rs             # 库入口
+│   │   ├── config.rs          # 配置管理
 │   │   ├── agent/
-│   │   │   ├── mod.rs        # Agent 调用逻辑
-│   │   │   └── claude.rs     # Claude Code 调用封装
-│   │   ├── tools/
-│   │   │   ├── jenkins.rs    # Jenkins API 封装
-│   │   │   └── gitlab.rs     # GitLab API 封装
-│   │   └── config.rs         # 配置管理
+│   │   │   ├── mod.rs         # Agent 编排核心
+│   │   │   ├── router.rs      # Intent 路由
+│   │   │   ├── step.rs        # Step 抽象
+│   │   │   └── claude.rs      # Claude Code 调用封装
+│   │   │   └── steps/
+│   │   │       ├── mod.rs
+│   │   │       ├── job_validate.rs    # 任务预检
+│   │   │       ├── jenkins_trigger.rs # 触发构建
+│   │   │       ├── jenkins_wait.rs    # 等待构建完成
+│   │   │       ├── jenkins_status.rs  # 获取构建状态
+│   │   │       ├── jenkins_log.rs     # 日志分析
+│   │   │       ├── claude_analyze.rs  # Claude 分析部署/错误
+│   │   │       └── claude_code.rs     # Claude Code 子代理
+│   │   └── tools/
+│   │       ├── mod.rs
+│   │       ├── jenkins.rs       # Jenkins API 封装
+│   │       ├── jenkins_cache.rs # 构建缓存
+│   │       └── gitlab.rs        # GitLab API 封装
+│   ├── tests/
+│   │   ├── jenkins_test.rs
+│   │   ├── log_analysis_test.rs
+│   │   └── step_chain_test.rs
 │   ├── Cargo.toml
 │   └── .env
-├── scripts/                  # Claude Code 调用的辅助脚本
+├── scripts/                   # 辅助脚本
 │   ├── trigger_jenkins.sh
 │   └── check_deploy.sh
-├── docker-compose.yml
 └── README.md
 ```
 
