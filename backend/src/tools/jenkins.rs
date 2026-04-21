@@ -67,6 +67,69 @@ pub async fn trigger_job(job_name: &str, params: &serde_json::Value, config: &Co
     }
 }
 
+/// Jenkins Job 类型
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobTypeInfo {
+    /// 多分支 Pipeline (WorkflowMultiBranchProject)
+    MultiBranchPipeline,
+    /// 普通 Pipeline (WorkflowJob)
+    Pipeline,
+    /// 普通 Job (FreeStyleJob 等)
+    Job,
+}
+
+impl JobTypeInfo {
+    pub fn from_class(class: &str) -> Self {
+        match class {
+            c if c.contains("WorkflowMultiBranchProject") => JobTypeInfo::MultiBranchPipeline,
+            c if c.contains("WorkflowJob") => JobTypeInfo::Pipeline,
+            _ => JobTypeInfo::Job,
+        }
+    }
+}
+
+/// 校验 Jenkins Job 是否存在并返回类型信息
+pub async fn check_job_exists(
+    job_name: &str,
+    config: &Config,
+) -> Result<(bool, JobTypeInfo, String)> {
+    let job_name = sanitize_job_name(job_name)?;
+    let client = Client::new();
+
+    let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Basic {}", encoded))?,
+    );
+
+    let url = format!(
+        "{}/job/{}/api/json?fields=_class,name",
+        config.jenkins_url, job_name
+    );
+
+    let response = client.get(&url).headers(headers).send().await?;
+
+    match response.status().as_u16() {
+        200 => {
+            let body: serde_json::Value = response.json().await?;
+            let class = body
+                .get("_class")
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            let name = body
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or(job_name)
+                .to_string();
+            Ok((true, JobTypeInfo::from_class(class), name))
+        }
+        404 => Ok((false, JobTypeInfo::Job, job_name.to_string())),
+        status => anyhow::bail!("Jenkins API error: HTTP {}", status),
+    }
+}
+
 /// 查询 Job 最近一次构建状态
 pub async fn get_job_status(job_name: &str, config: &Config) -> Result<serde_json::Value> {
     let job_name = sanitize_job_name(job_name)?;
@@ -288,8 +351,10 @@ async fn get_latest_build_number(
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        anyhow::bail!("Failed to get latest build number: {}", response.status());
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get latest build number: {} ({})", status, text);
     }
 
     let body: serde_json::Value = response.json().await?;
@@ -328,28 +393,39 @@ pub async fn get_pipeline_status(
     );
 
     let url = format!(
-        "{}/job/{}/job/{}/{}",
+        "{}/job/{}/job/{}/{}/api/json",
         config.jenkins_url, job_name, branch, build_number
     );
+    tracing::info!("get_pipeline_status URL: {}", url);
 
     let response = client
         .get(&url)
-        .header("Accept", "application/json")
-        .headers(headers)
+        .headers(headers.clone())
         .send()
         .await?;
 
-    if response.status().is_success() {
-        let body = response.json::<serde_json::Value>().await?;
+    let status_code = response.status();
+    let body_text = response.text().await?;
+    if status_code.is_success() {
+        tracing::debug!(
+            "get_pipeline_status status={} body_len={} body={}",
+            status_code,
+            body_text.len(),
+            &body_text[..body_text.len().min(500)]
+        );
+        let body: serde_json::Value = serde_json::from_str(body_text.trim())
+            .context("Failed to parse JSON response from Jenkins")?;
         Ok(body)
     } else {
-        anyhow::bail!("Failed to get pipeline status: {}", response.status())
+        tracing::error!("Pipeline status API error ({}): {}", status_code, body_text);
+        anyhow::bail!("Jenkins returned HTTP {}: {}", status_code, body_text)
     }
 }
 
 /// 等待 Pipeline 完成（轮询模式）
 ///
-/// 默认每 5 秒轮询一次，最多等待 30 分钟
+/// 默认每 2 秒轮询一次，最多等待 3 分钟
+/// 对临时网络错误自动重试，不直接失败
 pub async fn wait_for_pipeline(
     job_name: &str,
     branch: &str,
@@ -360,9 +436,33 @@ pub async fn wait_for_pipeline(
 ) -> Result<serde_json::Value> {
     let mut elapsed = 0u64;
     let sleep_duration = std::time::Duration::from_secs(poll_interval_secs);
+    let mut consecutive_errors = 0u32;
+    let max_consecutive_errors = 2;
 
     while elapsed < max_wait_secs {
-        let status = get_pipeline_status(job_name, branch, build_number, config).await?;
+        let status = match get_pipeline_status(job_name, branch, build_number, config).await {
+            Ok(s) => {
+                consecutive_errors = 0;
+                s
+            }
+            Err(e) => {
+                consecutive_errors += 1;
+                tracing::warn!(
+                    "wait_for_pipeline get_pipeline_status error ({}/{}): {}",
+                    consecutive_errors,
+                    max_consecutive_errors,
+                    e
+                );
+                // 连续错误超过阈值才放弃，避免临时网络抖动导致失败
+                if consecutive_errors >= max_consecutive_errors {
+                    return Err(e);
+                }
+                // 等待后继续重试
+                tokio::time::sleep(sleep_duration).await;
+                elapsed += poll_interval_secs;
+                continue;
+            }
+        };
 
         // 检查 inProgress 字段
         if let Some(in_progress) = status.get("inProgress").and_then(|v| v.as_bool()) {

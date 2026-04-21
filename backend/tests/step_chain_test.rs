@@ -1,5 +1,7 @@
-use devops_agent::agent::{Intent, IntentRouter, StepContext, TaskType};
+use devops_agent::agent::{Intent, IntentRouter, Step, StepContext, StepResult, TaskType};
 use devops_agent::config::Config;
+use devops_agent::tools::jenkins;
+use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
 #[ctor::ctor]
@@ -26,45 +28,113 @@ async fn test_step_context_creation() {
     assert!(ctx.build_number.is_none());
 }
 
+/// 测试 JobValidateStep 缺少 job_name 时中止
+#[tokio::test]
+async fn test_job_validate_missing_job_name() {
+    let config = Config::from_env();
+    let mut ctx = StepContext::new(
+        "test".to_string(),
+        TaskType::default(),
+        None,
+        Some("dev".to_string()),
+        Arc::new(config),
+    );
+
+    let result =
+        devops_agent::agent::steps::job_validate::JobValidateStep.execute(&mut ctx).await;
+    match result {
+        StepResult::Abort { reason } => assert!(reason.contains("job_name")),
+        _ => panic!("Expected Abort, got {:?}", result),
+    }
+}
+
+/// 测试 JobValidateStep 校验不存在的 Job
+#[tokio::test]
+async fn test_job_validate_nonexistent_job() {
+    let config = Config::from_env();
+    let mut ctx = StepContext::new(
+        "test".to_string(),
+        TaskType::default(),
+        Some("this-job-definitely-does-not-exist-xyz".to_string()),
+        Some("dev".to_string()),
+        Arc::new(config),
+    );
+
+    let result =
+        devops_agent::agent::steps::job_validate::JobValidateStep.execute(&mut ctx).await;
+    match result {
+        StepResult::Failed { error } => assert!(error.contains("不存在")),
+        _ => panic!("Expected Failed, got {:?}", result),
+    }
+}
+
+/// 测试 check_job_exists 函数 — 不存在的 Job
+#[tokio::test]
+async fn test_check_job_not_exists() {
+    let config = Config::from_env();
+    let (exists, _job_type, _name) = jenkins::check_job_exists(
+        "this-job-definitely-does-not-exist-xyz",
+        &config,
+    )
+    .await
+    .expect("check_job_exists should not error on 404");
+    assert!(!exists, "Non-existent job should return exists=false");
+}
+
 /// 测试 IntentRouter 识别 deploy 意图
 #[tokio::test]
 async fn test_intent_deploy() {
-    let router = IntentRouter;
-    let intent = router.identify("部署 order-service 到 staging 环境").await;
+    let config = Config::from_env();
+    let cache = Arc::new(JenkinsCacheManager::new(config));
+    cache.refresh().await.ok();
+    let router = IntentRouter::new(cache);
+    let (intent, _) = router.identify("部署 order-service 到 staging 环境").await;
     assert!(matches!(intent, Intent::DeployPipeline { .. }));
 }
 
 /// 测试 IntentRouter 识别 build 意图
 #[tokio::test]
 async fn test_intent_build() {
-    let router = IntentRouter;
-    let intent = router.identify("构建 ds-pkg 项目").await;
+    let config = Config::from_env();
+    let cache = Arc::new(JenkinsCacheManager::new(config));
+    cache.refresh().await.ok();
+    let router = IntentRouter::new(cache);
+    let (intent, _) = router.identify("构建 ds-pkg 项目").await;
     assert!(matches!(intent, Intent::BuildPipeline { .. }));
 }
 
 /// 测试 IntentRouter 识别 query 意图
 #[tokio::test]
 async fn test_intent_query() {
-    let router = IntentRouter;
-    let intent = router.identify("查询 ds-pkg dev 分支的构建状态").await;
-    assert!(matches!(intent, Intent::QueryPipeline { .. }));
+    let config = Config::from_env();
+    let cache = Arc::new(JenkinsCacheManager::new(config));
+    cache.refresh().await.ok();
+    let router = IntentRouter::new(cache);
+    let (intent, _) = router.identify("查询 ds-pkg dev 分支的构建状态").await;
+    assert!(matches!(intent, Intent::QueryPipeline { .. }), "got: {:?}", intent);
 }
 
 /// 测试 IntentRouter 识别 analyze 意图
 #[tokio::test]
 async fn test_intent_analyze() {
-    let router = IntentRouter;
-    let intent = router.identify("分析 ds-pkg dev 分支的构建日志").await;
-    assert!(matches!(intent, Intent::AnalyzeBuild { .. }));
+    let config = Config::from_env();
+    let cache = Arc::new(JenkinsCacheManager::new(config));
+    cache.refresh().await.ok();
+    let router = IntentRouter::new(cache);
+    let (intent, _) = router.identify("分析 ds-pkg dev 分支的构建日志").await;
+    assert!(matches!(intent, Intent::AnalyzeBuild { .. }), "got: {:?}", intent);
 }
 
 /// 测试 IntentRouter 的 StepChain 映射 — DeployPipeline
 #[test]
 fn test_chain_deploy_pipeline() {
-    let router = IntentRouter;
+    let config = Config::from_env();
+    let cache = Arc::new(JenkinsCacheManager::new(config));
+    let router = IntentRouter::new(cache);
     let intent = Intent::DeployPipeline {
         job_name: "ds-pkg".to_string(),
         branch: Some("dev".to_string()),
+        job_type: Default::default(),
     };
     let _chain = router.to_chain_with_prompt(&intent, "部署 ds-pkg");
     // StepChain 内部 steps 是私有字段，无法直接测试数量
@@ -74,10 +144,13 @@ fn test_chain_deploy_pipeline() {
 /// 测试 IntentRouter 的 StepChain 映射 — QueryPipeline
 #[test]
 fn test_chain_query_pipeline() {
-    let router = IntentRouter;
+    let config = Config::from_env();
+    let cache = Arc::new(JenkinsCacheManager::new(config));
+    let router = IntentRouter::new(cache);
     let intent = Intent::QueryPipeline {
         job_name: "ds-pkg".to_string(),
         branch: Some("dev".to_string()),
+        job_type: Default::default(),
     };
     let _chain = router.to_chain_with_prompt(&intent, "查询 ds-pkg dev 状态");
     // 同上，端到端验证

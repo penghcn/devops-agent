@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::config::Config;
+use crate::tools::jenkins_cache::JenkinsCacheManager;
 
 use super::TaskType;
 
@@ -31,12 +32,20 @@ pub struct StepContext {
     pub job_name: Option<String>,
     pub branch: Option<String>,
     pub config: Arc<Config>,
+    pub cache: Option<Arc<JenkinsCacheManager>>,
     pub build_number: Option<u32>,
     pub pipeline_status: Option<Value>,
     pub build_log: Option<String>,
     pub analysis_result: Option<String>,
+    pub structured_analysis: Option<serde_json::Value>,
     /// 记录每个 Step 的执行结果（用于展示思考过程）
     pub steps: Vec<super::AgentStep>,
+    /// 每个 Step 的耗时（秒）
+    pub step_elapsed: Vec<f64>,
+    /// identify() 中 Claude 调用的耗时（秒），StepChain 执行时加到第一步
+    pub identify_elapsed: Option<f64>,
+    /// 分支名模糊修正提示，如 "原始分支 'de5' 已修正为 'dev'"
+    pub branch_correction: Option<String>,
 }
 
 impl StepContext {
@@ -53,12 +62,32 @@ impl StepContext {
             job_name,
             branch,
             config,
+            cache: None,
             build_number: None,
             pipeline_status: None,
             build_log: None,
             analysis_result: None,
+            structured_analysis: None,
             steps: Vec::new(),
+            step_elapsed: Vec::new(),
+            identify_elapsed: None,
+            branch_correction: None,
         }
+    }
+
+    pub fn with_cache(mut self, cache: Arc<JenkinsCacheManager>) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    pub fn with_identify_elapsed(mut self, elapsed: f64) -> Self {
+        self.identify_elapsed = Some(elapsed);
+        self
+    }
+
+    pub fn with_branch_correction(mut self, correction: String) -> Self {
+        self.branch_correction = Some(correction);
+        self
     }
 }
 
@@ -83,34 +112,39 @@ impl StepChain {
         let mut ctx = ctx;
         let mut final_steps = Vec::new();
 
-        for step in &self.steps {
+        for (i, step) in self.steps.iter().enumerate() {
             let step_name = step.name().to_string();
+            let start = std::time::Instant::now();
+
             ctx.steps.push(super::AgentStep {
                 action: step_name.clone(),
                 result: "执行中...".to_string(),
+                elapsed: None,
             });
 
             let result = step.execute(&mut ctx).await;
+            let elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
-            match &result {
-                StepResult::Success { message } => {
-                    ctx.steps.last_mut().unwrap().result = message.clone();
-                }
-                StepResult::Failed { error } => {
-                    ctx.steps.last_mut().unwrap().result = format!("失败: {}", error);
-                    final_steps = ctx.steps.clone();
-                    break;
-                }
-                StepResult::Abort { reason } => {
-                    ctx.steps.last_mut().unwrap().result = format!("中止: {}", reason);
-                    final_steps = ctx.steps.clone();
-                    break;
-                }
-            }
+            // 第一步累加 identify() 的耗时
+            let total_elapsed = if i == 0 {
+                ctx.identify_elapsed.map(|e| e + elapsed).unwrap_or(elapsed)
+            } else {
+                elapsed
+            };
+
+            // 更新 result 并回填 elapsed
+            let step_result = match &result {
+                StepResult::Success { message } => message.clone(),
+                StepResult::Failed { error } => format!("失败: {}", error),
+                StepResult::Abort { reason } => format!("中止: {}", reason),
+            };
+            let last = ctx.steps.last_mut().unwrap();
+            last.result = step_result;
+            last.elapsed = Some(total_elapsed);
 
             final_steps = ctx.steps.clone();
 
-            if result.is_abort() {
+            if result.is_abort() || !result.is_success() {
                 break;
             }
         }

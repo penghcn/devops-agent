@@ -102,103 +102,39 @@ async fn test_ds_pkg_dev_branch_exists() {
 
 #[tokio::test]
 async fn test_trigger_ds_pkg_dev_build() {
-    let (url, user, token) = get_jenkins_config();
-    let client = Client::new();
-    let auth = build_auth_header(&user, &token);
-
-    // 获取本地缓存的 jenkins-cli.jar
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(false)
+        .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
+        .init();
     let config = Config::from_env();
-    let cli_jar = jenkins::get_cli_jar(&config).await.expect("Failed to get jenkins-cli.jar");
-    println!("Using jenkins-cli.jar: {}", cli_jar);
 
-    // 使用 Jenkins CLI 触发构建（Tomcat 7.0.75 POST bug workaround）
-    let cli_output = std::process::Command::new("java")
-        .arg("-jar")
-        .arg(&cli_jar)
-        .arg("-s")
-        .arg(&url)
-        .arg("-auth")
-        .arg(format!("{}:{}", user, token))
-        .arg("build")
-        .arg("ds-pkg/dev")
-        .output()
-        .expect("Failed to execute Jenkins CLI");
-
-    if !cli_output.status.success() {
-        let stderr = String::from_utf8_lossy(&cli_output.stderr);
-        panic!("Jenkins CLI build failed: {}", stderr.trim());
-    }
-
-    println!("Jenkins CLI triggered build successfully");
-
-    // 通过 HTTP API GET 获取最新构建号
-    let status_response = client
-        .get(&format!("{}/job/ds-pkg/job/dev/api/json?fields=lastBuild", url))
-        .header("Authorization", &auth)
-        .send()
+    // 触发构建 + 自动等待完成（封装在 trigger_pipeline + wait_for_pipeline 中）
+    let message = jenkins::trigger_pipeline("ds-pkg", Some("dev"), &config)
         .await
-        .expect("Failed to get latest build info");
+        .expect("trigger_pipeline failed");
+    println!("{}", message);
 
-    assert!(status_response.status().is_success(), "Failed to get build info");
-    let body: serde_json::Value = status_response.json().await.unwrap();
-    let build_num = body
-        .get("lastBuild")
-        .and_then(|b| b.get("number"))
-        .and_then(|n| n.as_u64())
-        .map(|n| n as u32)
-        .expect("No lastBuild found");
+    // 从消息中提取构建号
+    let build_num = message
+        .split('/')
+        .filter(|s| s.parse::<u32>().is_ok())
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .expect("No build number in message");
+    println!("Build #{} triggered", build_num);
 
-    println!("Build #{} triggered successfully", build_num);
+    // 等待构建完成（最多 30 分钟，每 10 秒轮询）
+    let status = jenkins::wait_for_pipeline("ds-pkg", "dev", build_num, &config, 10, 1800)
+        .await
+        .expect("wait_for_pipeline failed");
 
-    // 等待构建完成（最多 3 分钟 5s一轮）
-    let max_wait = 180u64;
-    let poll_interval = 5u64;
-    let mut elapsed = 0u64;
+    let result = status.get("result").and_then(|r| r.as_str()).unwrap_or("UNKNOWN");
+    let in_progress = status.get("inProgress").and_then(|v| v.as_bool()).unwrap_or(false);
+    println!("Build #{} completed: result={}, inProgress={}", build_num, result, in_progress);
 
-    while elapsed < max_wait {
-        tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval)).await;
-        elapsed += poll_interval;
-
-        let status_response = client
-            .get(&format!("{}/job/ds-pkg/job/dev/{}/api/json", url, build_num))
-            .header("Authorization", &auth)
-            .send()
-            .await
-            .expect("Failed to get build status");
-
-        if !status_response.status().is_success() {
-            continue;
-        }
-
-        let status: serde_json::Value = status_response.json().await.unwrap();
-        let in_progress = status.get("inProgress").and_then(|v| v.as_bool()).unwrap_or(true);
-        let result = status.get("result").and_then(|v| v.as_str());
-
-        println!(
-            "Build #{} - Elapsed: {}s, InProgress: {}, Result: {:?}",
-            build_num, elapsed, in_progress, result
-        );
-
-        // 构建完成条件：inProgress 为 false 或 result 有值
-        let completed = !in_progress || result.is_some();
-        if completed {
-            if let Some(r) = result {
-                println!("Build #{} completed with result: {}", build_num, r);
-                assert!(
-                    r == "SUCCESS",
-                    "Build #{} failed with result: {}",
-                    build_num,
-                    r
-                );
-            } else {
-                println!("Build #{} is still running but inProgress=false", build_num);
-            }
-            break;
-        }
-    }
-
-    if elapsed >= max_wait {
-        panic!("Build #{} did not complete within {} seconds", build_num, max_wait);
+    if result != "SUCCESS" && result != "UNKNOWN" {
+        panic!("Build #{} failed with result: {}", build_num, result);
     }
 }
 

@@ -32,25 +32,98 @@ impl Step for ClaudeAnalyzeStep {
         };
 
         match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
-            Ok(result) => {
-                ctx.analysis_result = Some(result.clone());
-                StepResult::Success { message: "分析完成".to_string() }
+            Ok(raw_result) => {
+                // 尝试从 Claude 响应中提取 JSON 块
+                let json_str = extract_json(&raw_result);
+                match serde_json::from_str::<serde_json::Value>(&json_str) {
+                    Ok(structured) => {
+                        ctx.structured_analysis = Some(structured.clone());
+                        // 同时生成一段人类可读的文本
+                        let human_text = format_structured_output(&structured);
+                        ctx.analysis_result = Some(human_text);
+                        StepResult::Success { message: "分析完成".to_string() }
+                    }
+                    Err(_) => {
+                        // 回退：原始文本
+                        ctx.analysis_result = Some(raw_result);
+                        StepResult::Success { message: "分析完成".to_string() }
+                    }
+                }
             }
             Err(e) => StepResult::Failed { error: e.to_string() },
         }
     }
 }
 
+fn extract_json(text: &str) -> &str {
+    // 尝试从 ```json ... ``` 块中提取
+    if let Some(start) = text.find("```json") {
+        let after_marker = &text[start + 7..];
+        if let Some(end) = after_marker.find("```") {
+            return after_marker[..end].trim();
+        }
+    }
+    // 尝试从 ``` ... ``` 块中提取
+    if let Some(start) = text.find("```") {
+        let after_marker = &text[start + 3..];
+        if let Some(end) = after_marker.find("```") {
+            return after_marker[..end].trim();
+        }
+    }
+    // 尝试找最外层的 {} 块
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            return &text[start..end + 1];
+        }
+    }
+    text
+}
+
+fn format_structured_output(data: &serde_json::Value) -> String {
+    match data.get("deploy_status") {
+        Some(s) if s.as_str() == Some("success") => {
+            let servers_array: Vec<&str> = data.get("servers")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            let summary = data.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+            format!(
+                "部署成功。目标服务器: {}\n摘要: {}",
+                servers_array.join(", "),
+                summary
+            )
+        }
+        Some(s) if s.as_str() == Some("failed") => {
+            let error = data.get("error").and_then(|v| v.as_str()).unwrap_or("未知错误");
+            let suggestion = data.get("suggestion").and_then(|v| v.as_str()).unwrap_or("");
+            format!(
+                "部署失败: {}\n建议: {}",
+                error, suggestion
+            )
+        }
+        _ => {
+            // 构建分析结果
+            let build_status = data.get("build_status").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+            let error = data.get("error").and_then(|v| v.as_str()).unwrap_or("");
+            let suggestion = data.get("suggestion").and_then(|v| v.as_str()).unwrap_or("");
+            format!(
+                "构建状态: {}\n错误: {}\n建议: {}",
+                build_status, error, suggestion
+            )
+        }
+    }
+}
+
 fn build_deploy_check_prompt(log: &str) -> String {
     format!(
-        "你是一个 DevOps 工程师。请分析以下 Jenkins 构建日志中的 SSH deploy 阶段，给出:\n1. 部署状态（成功/失败）\n2. 部署到了哪些目标服务器/环境\n3. 部署关键日志摘要\n4. 是否需要进一步操作（如验证服务健康状态等）\n\n构建日志:\n{}",
+        "你是一个 DevOps 工程师。请分析以下 Jenkins 构建日志中的 SSH deploy 阶段，给出结构化结果。\n\n只输出 JSON，不要输出其他内容：\n```json\n{{\"deploy_status\":\"success|failed\",\"servers\":[\"服务器1\",\"服务器2\"],\"summary\":\"部署关键日志摘要\",\"error\":\"失败原因（如果成功则为空）\",\"suggestion\":\"后续操作建议\"}}\n```\n\n构建日志:\n{}",
         log
     )
 }
 
 fn build_failure_analysis_prompt(log: &str, result: &str) -> String {
     format!(
-        "你是一个 DevOps 工程师。请分析以下构建结果，给出:\n1. 构建状态摘要\n2. 如果失败，分析可能的失败原因\n3. 修复建议\n\n构建状态: {}\n构建日志:\n{}",
+        "你是一个 DevOps 工程师。请分析以下构建结果，给出结构化结果。\n\n只输出 JSON，不要输出其他内容：\n```json\n{{\"build_status\":\"failed|success\",\"error\":\"失败原因分析\",\"suggestion\":\"修复建议\"}}\n```\n\n构建状态: {}\n构建日志:\n{}",
         result, log
     )
 }

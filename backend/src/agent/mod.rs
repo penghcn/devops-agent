@@ -1,5 +1,5 @@
 mod step;
-mod steps;
+pub mod steps;
 mod router;
 
 pub use step::{Step, StepContext, StepResult, StepChain};
@@ -8,8 +8,9 @@ pub use router::{Intent, IntentRouter};
 mod claude;
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use crate::config::Config;
-use claude::{call_with_skill, call_claude_code};
+use crate::tools::jenkins_cache::JenkinsCacheManager;
 
 #[derive(Debug, Deserialize)]
 pub struct AgentRequest {
@@ -38,42 +39,22 @@ pub struct AgentResponse {
     pub success: bool,
     pub output: String,
     pub steps: Vec<AgentStep>,  // 展示思考过程
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<serde_json::Value>,  // Claude 结构化分析结果
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_correction: Option<String>,  // 分支名模糊修正提示
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentStep {
     pub action: String,
     pub result: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elapsed: Option<f64>,
 }
 
 /// 主 Agent 入口 — 基于步骤链架构
-pub async fn process_request(req: AgentRequest, _config: &Config) -> AgentResponse {
-    let intent_router = IntentRouter;
-    let intent = intent_router.identify(&req.prompt).await;
-
-    let chain = intent_router.to_chain_with_prompt(&intent, &req.prompt);
-
-    let ctx = StepContext::new(
-        req.prompt.clone(),
-        req.task_type,
-        req.job_name.clone(),
-        req.branch.clone(),
-        std::sync::Arc::new(_config.clone()),
-    );
-
-    let (final_ctx, steps) = chain.execute(ctx).await;
-
-    AgentResponse {
-        success: final_ctx.steps.iter().any(|s| {
-            s.result.contains("成功") || s.result.contains("完成")
-        }),
-        output: final_ctx.analysis_result.clone().unwrap_or_else(|| {
-            final_ctx
-                .steps
-                .last()
-                .map(|s| s.result.clone())
-                .unwrap_or_else(|| "处理完成".to_string())
-        }),
-        steps,
-    }
+pub async fn process_request(req: AgentRequest, _config: &Config, cache: Arc<JenkinsCacheManager>) -> AgentResponse {
+    let intent_router = IntentRouter::new(cache);
+    intent_router.execute(&req.prompt, req.task_type).await
 }
