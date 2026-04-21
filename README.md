@@ -16,6 +16,7 @@
 - 可靠性：Rust 的错误处理比 LLM 生成的 curl 更可控
 
 ## 架构
+```
 claude-devops-agent/
 ├── frontend/      # BUN + TS + Vite + Vue 3 + tailwindcss 前端
 │   ├── src/
@@ -43,6 +44,7 @@ claude-devops-agent/
 │   └── check_deploy.sh
 ├── docker-compose.yml
 └── README.md
+```
 
 ## 部署、测试
 ```
@@ -58,5 +60,5 @@ bun run dev
 # 3. 访问 http://localhost:5173
 ```
 ## 效果图
-[预检失败](./images/jda1.png)
-[构建成功](./images/jda2.png)
+![预检失败](./images/jda1.png)
+![构建成功](./images/jda2.png)
