@@ -40,8 +40,9 @@ async fn test_job_validate_missing_job_name() {
         Arc::new(config),
     );
 
-    let result =
-        devops_agent::agent::steps::job_validate::JobValidateStep.execute(&mut ctx).await;
+    let result = devops_agent::agent::steps::job_validate::JobValidateStep
+        .execute(&mut ctx)
+        .await;
     match result {
         StepResult::Abort { reason } => assert!(reason.contains("job_name")),
         _ => panic!("Expected Abort, got {:?}", result),
@@ -60,8 +61,9 @@ async fn test_job_validate_nonexistent_job() {
         Arc::new(config),
     );
 
-    let result =
-        devops_agent::agent::steps::job_validate::JobValidateStep.execute(&mut ctx).await;
+    let result = devops_agent::agent::steps::job_validate::JobValidateStep
+        .execute(&mut ctx)
+        .await;
     match result {
         StepResult::Failed { error } => assert!(error.contains("不存在")),
         _ => panic!("Expected Failed, got {:?}", result),
@@ -72,12 +74,10 @@ async fn test_job_validate_nonexistent_job() {
 #[tokio::test]
 async fn test_check_job_not_exists() {
     let config = Config::from_env();
-    let (exists, _job_type, _name) = jenkins::check_job_exists(
-        "this-job-definitely-does-not-exist-xyz",
-        &config,
-    )
-    .await
-    .expect("check_job_exists should not error on 404");
+    let (exists, _job_type, _name) =
+        jenkins::check_job_exists("this-job-definitely-does-not-exist-xyz", &config)
+            .await
+            .expect("check_job_exists should not error on 404");
     assert!(!exists, "Non-existent job should return exists=false");
 }
 
@@ -111,7 +111,11 @@ async fn test_intent_query() {
     cache.refresh().await.ok();
     let router = IntentRouter::new(cache);
     let (intent, _) = router.identify("查询 ds-pkg dev 分支的构建状态").await;
-    assert!(matches!(intent, Intent::QueryPipeline { .. }), "got: {:?}", intent);
+    assert!(
+        matches!(intent, Intent::QueryPipeline { .. }),
+        "got: {:?}",
+        intent
+    );
 }
 
 /// 测试 IntentRouter 识别 analyze 意图
@@ -122,7 +126,11 @@ async fn test_intent_analyze() {
     cache.refresh().await.ok();
     let router = IntentRouter::new(cache);
     let (intent, _) = router.identify("分析 ds-pkg dev 分支的构建日志").await;
-    assert!(matches!(intent, Intent::AnalyzeBuild { .. }), "got: {:?}", intent);
+    assert!(
+        matches!(intent, Intent::AnalyzeBuild { .. }),
+        "got: {:?}",
+        intent
+    );
 }
 
 /// 测试 IntentRouter 的 StepChain 映射 — DeployPipeline

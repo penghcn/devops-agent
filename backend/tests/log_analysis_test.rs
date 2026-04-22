@@ -37,8 +37,9 @@ async fn test_jenkins_log_step_missing_job_name() {
     );
     ctx.build_number = Some(1);
 
-    let result =
-        devops_agent::agent::steps::jenkins_log::JenkinsLogStep.execute(&mut ctx).await;
+    let result = devops_agent::agent::steps::jenkins_log::JenkinsLogStep
+        .execute(&mut ctx)
+        .await;
     match result {
         StepResult::Abort { reason } => assert!(reason.contains("job_name")),
         _ => panic!("Expected Abort, got {:?}", result),
@@ -58,8 +59,9 @@ async fn test_jenkins_log_step_missing_branch() {
     );
     ctx.build_number = Some(1);
 
-    let result =
-        devops_agent::agent::steps::jenkins_log::JenkinsLogStep.execute(&mut ctx).await;
+    let result = devops_agent::agent::steps::jenkins_log::JenkinsLogStep
+        .execute(&mut ctx)
+        .await;
     match result {
         StepResult::Abort { reason } => assert!(reason.contains("branch")),
         _ => panic!("Expected Abort, got {:?}", result),
@@ -79,8 +81,9 @@ async fn test_jenkins_log_step_missing_build_number() {
     );
     // build_number 为 None
 
-    let result =
-        devops_agent::agent::steps::jenkins_log::JenkinsLogStep.execute(&mut ctx).await;
+    let result = devops_agent::agent::steps::jenkins_log::JenkinsLogStep
+        .execute(&mut ctx)
+        .await;
     match result {
         StepResult::Abort { reason } => assert!(reason.contains("build_number")),
         _ => panic!("Expected Abort, got {:?}", result),
@@ -102,8 +105,10 @@ async fn test_get_real_build_log() {
 
     println!("Log length: {} bytes", log.len());
     assert!(log.len() > 0, "Build log should not be empty");
-    assert!(log.contains("[Pipeline]") || log.contains("Started"),
-        "Log should contain pipeline markers");
+    assert!(
+        log.contains("[Pipeline]") || log.contains("Started"),
+        "Log should contain pipeline markers"
+    );
 }
 
 /// 集成测试：获取构建日志并分析完整性（成功构建场景）
@@ -118,15 +123,20 @@ async fn test_log_analysis_success_build() {
         .await
         .expect("Failed to get pipeline status");
 
-    let result = status.get("result")
+    let result = status
+        .get("result")
         .and_then(|r| r.as_str())
         .unwrap_or("UNKNOWN");
 
-    let in_progress = status.get("inProgress")
+    let in_progress = status
+        .get("inProgress")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    println!("Build #{}: result={}, inProgress={}", build_num, result, in_progress);
+    println!(
+        "Build #{}: result={}, inProgress={}",
+        build_num, result, in_progress
+    );
 
     // 如果构建还在进行中，跳过分析测试
     if in_progress || result.is_empty() {
@@ -144,9 +154,15 @@ async fn test_log_analysis_success_build() {
     let has_deploy_in_full = log.contains("SSH deploy") || log.contains("deploy");
 
     println!("Full log has deploy: {}", has_deploy_in_full);
-    println!("Log start (first 200 chars):\n{}", &log[..log.len().min(200)]);
+    println!(
+        "Log start (first 200 chars):\n{}",
+        &log[..log.len().min(200)]
+    );
     if log.len() > 5000 {
-        println!("Log end (last 200 chars):\n{}", &log[log.len()-200.min(log.len())..log.len()]);
+        println!(
+            "Log end (last 200 chars):\n{}",
+            &log[log.len() - 200.min(log.len())..log.len()]
+        );
     }
 }
 
@@ -158,7 +174,10 @@ async fn get_latest_build_number(
 ) -> Result<u32, anyhow::Error> {
     use anyhow::Context;
     use base64::Engine;
-    use reqwest::{Client, header::{HeaderMap, HeaderValue, AUTHORIZATION}};
+    use reqwest::{
+        Client,
+        header::{AUTHORIZATION, HeaderMap, HeaderValue},
+    };
 
     let client = Client::new();
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);

@@ -24,7 +24,10 @@ fn get_jenkins_config() -> (String, String, String) {
 /// 构建 Basic Auth Header
 fn build_auth_header(user: &str, token: &str) -> String {
     let auth = format!("{}:{}", user, token);
-    format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(&auth))
+    format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(&auth)
+    )
 }
 
 #[tokio::test]
@@ -86,7 +89,10 @@ async fn test_ds_pkg_dev_branch_exists() {
         .await
         .expect("Failed to get ds-pkg/dev branch info");
 
-    assert!(response.status().is_success(), "ds-pkg dev branch not found");
+    assert!(
+        response.status().is_success(),
+        "ds-pkg dev branch not found"
+    );
     let body: serde_json::Value = response.json().await.unwrap();
     println!("Branch name: {:?}", body.get("displayName"));
     println!("Branch type: {:?}", body.get("_class"));
@@ -129,9 +135,18 @@ async fn test_trigger_ds_pkg_dev_build() {
         .await
         .expect("wait_for_pipeline failed");
 
-    let result = status.get("result").and_then(|r| r.as_str()).unwrap_or("UNKNOWN");
-    let in_progress = status.get("inProgress").and_then(|v| v.as_bool()).unwrap_or(false);
-    println!("Build #{} completed: result={}, inProgress={}", build_num, result, in_progress);
+    let result = status
+        .get("result")
+        .and_then(|r| r.as_str())
+        .unwrap_or("UNKNOWN");
+    let in_progress = status
+        .get("inProgress")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    println!(
+        "Build #{} completed: result={}, inProgress={}",
+        build_num, result, in_progress
+    );
 
     if result != "SUCCESS" && result != "UNKNOWN" {
         panic!("Build #{} failed with result: {}", build_num, result);
@@ -146,7 +161,10 @@ async fn test_get_latest_build_status() {
 
     // 获取最新构建信息
     let response = client
-        .get(&format!("{}/job/ds-pkg/job/dev/api/json?fields=lastBuild,number", url))
+        .get(&format!(
+            "{}/job/ds-pkg/job/dev/api/json?fields=lastBuild,number",
+            url
+        ))
         .header("Authorization", &auth)
         .send()
         .await
@@ -155,7 +173,10 @@ async fn test_get_latest_build_status() {
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.unwrap();
 
-    println!("Latest build info: {:?}", serde_json::to_string_pretty(&body).unwrap());
+    println!(
+        "Latest build info: {:?}",
+        serde_json::to_string_pretty(&body).unwrap()
+    );
 
     if let Some(last_build) = body.get("lastBuild") {
         let build_num = last_build.get("number").and_then(|n| n.as_u64());

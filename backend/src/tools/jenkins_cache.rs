@@ -29,6 +29,7 @@ pub struct JenkinsCache {
 pub struct JenkinsCacheManager {
     config: Config,
     cache: Arc<RwLock<Option<JenkinsCache>>>,
+    #[expect(dead_code)]
     refresh_interval: Duration,
 }
 
@@ -81,8 +82,15 @@ impl JenkinsCacheManager {
         );
 
         // 获取所有 Job
-        let root_url = format!("{}/api/json?fields=_class,name,url,jobs[_class,name,url]", self.config.jenkins_url);
-        let response = client.get(&root_url).headers(headers.clone()).send().await?;
+        let root_url = format!(
+            "{}/api/json?fields=_class,name,url,jobs[_class,name,url]",
+            self.config.jenkins_url
+        );
+        let response = client
+            .get(&root_url)
+            .headers(headers.clone())
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             anyhow::bail!("Failed to list Jenkins jobs: {}", response.status());
@@ -108,16 +116,15 @@ impl JenkinsCacheManager {
                 .and_then(|u| u.as_str())
                 .unwrap_or("")
                 .to_string();
-            let class = job
-                .get("_class")
-                .and_then(|c| c.as_str())
-                .unwrap_or("");
+            let class = job.get("_class").and_then(|c| c.as_str()).unwrap_or("");
 
             let job_type = JobTypeInfo::from_class(class);
 
             // 多分支 Pipeline 需要获取分支列表
             let branches = if matches!(job_type, JobTypeInfo::MultiBranchPipeline) {
-                self.fetch_branches(&name, &headers).await.unwrap_or_default()
+                self.fetch_branches(&name, &headers)
+                    .await
+                    .unwrap_or_default()
             } else {
                 vec![]
             };
@@ -138,7 +145,11 @@ impl JenkinsCacheManager {
     }
 
     /// 获取多分支 Pipeline 的分支列表
-    async fn fetch_branches(&self, job_name: &str, headers: &reqwest::header::HeaderMap) -> Result<Vec<String>> {
+    async fn fetch_branches(
+        &self,
+        job_name: &str,
+        headers: &reqwest::header::HeaderMap,
+    ) -> Result<Vec<String>> {
         let client = reqwest::Client::new();
         let url = format!(
             "{}/job/{}/api/json?fields=jobs[name]",
@@ -166,9 +177,11 @@ impl JenkinsCacheManager {
 
     /// 根据名称查找 Job
     pub async fn find_job(&self, name: &str) -> Option<CachedJob> {
-        self.cache.read().await.as_ref().and_then(|c| {
-            c.jobs.iter().find(|j| j.name == name).cloned()
-        })
+        self.cache
+            .read()
+            .await
+            .as_ref()
+            .and_then(|c| c.jobs.iter().find(|j| j.name == name).cloned())
     }
 
     /// 判断 Job 是否存在（从缓存）

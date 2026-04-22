@@ -12,7 +12,7 @@ name = "devops-agent"
 path = "src/main.rs"
 
 [dependencies]
-yunli = "0.1"          
+yunli = "0.1"         
 axum = "0.7"          # Web 框架
 tokio = { version = "1", features = ["full"] }  # 异步运行时
 chrono = { version = "0.4", features = ["serde"] }  # 时间处理
