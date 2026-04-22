@@ -15,7 +15,9 @@ impl Step for ClaudeCodeStep {
     async fn execute(&self, _ctx: &mut StepContext) -> StepResult {
         match claude::call_claude_code(&self.prompt, &self.allowed_tools).await {
             Ok(result) => StepResult::Success { message: result },
-            Err(e) => StepResult::Failed { error: e.to_string() },
+            Err(e) => StepResult::Failed {
+                error: e.to_string(),
+            },
         }
     }
 }

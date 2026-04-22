@@ -12,17 +12,29 @@ impl Step for JenkinsLogStep {
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let build_number = match ctx.build_number {
             Some(n) => n,
-            None => return StepResult::Abort { reason: "缺少 build_number".to_string() },
+            None => {
+                return StepResult::Abort {
+                    reason: "缺少 build_number".to_string(),
+                };
+            }
         };
 
         let job_name = match &ctx.job_name {
             Some(j) => j.clone(),
-            None => return StepResult::Abort { reason: "缺少 job_name".to_string() },
+            None => {
+                return StepResult::Abort {
+                    reason: "缺少 job_name".to_string(),
+                };
+            }
         };
 
         let branch = match &ctx.branch {
             Some(b) => b.clone(),
-            None => return StepResult::Abort { reason: "缺少 branch".to_string() },
+            None => {
+                return StepResult::Abort {
+                    reason: "缺少 branch".to_string(),
+                };
+            }
         };
 
         match jenkins::get_build_log(&job_name, &branch, build_number, &ctx.config).await {
@@ -32,7 +44,9 @@ impl Step for JenkinsLogStep {
                     message: format!("获取日志成功 ({} 字符)", log.len()),
                 }
             }
-            Err(e) => StepResult::Failed { error: e.to_string() },
+            Err(e) => StepResult::Failed {
+                error: e.to_string(),
+            },
         }
     }
 }

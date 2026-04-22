@@ -4,7 +4,9 @@ use super::super::step::{Step, StepContext, StepResult};
 pub struct ClaudeAnalyzeStep;
 
 impl Default for ClaudeAnalyzeStep {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 #[async_trait::async_trait]
@@ -16,10 +18,15 @@ impl Step for ClaudeAnalyzeStep {
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let log = match &ctx.build_log {
             Some(log) if !log.is_empty() => log,
-            _ => return StepResult::Abort { reason: "没有可分析的构建日志".to_string() },
+            _ => {
+                return StepResult::Abort {
+                    reason: "没有可分析的构建日志".to_string(),
+                };
+            }
         };
 
-        let result = ctx.pipeline_status
+        let result = ctx
+            .pipeline_status
             .as_ref()
             .and_then(|s| s.get("result"))
             .and_then(|r| r.as_str())
@@ -35,22 +42,28 @@ impl Step for ClaudeAnalyzeStep {
             Ok(raw_result) => {
                 // 尝试从 Claude 响应中提取 JSON 块
                 let json_str = extract_json(&raw_result);
-                match serde_json::from_str::<serde_json::Value>(&json_str) {
+    match serde_json::from_str::<serde_json::Value>(json_str) {
                     Ok(structured) => {
                         ctx.structured_analysis = Some(structured.clone());
                         // 同时生成一段人类可读的文本
                         let human_text = format_structured_output(&structured);
                         ctx.analysis_result = Some(human_text);
-                        StepResult::Success { message: "分析完成".to_string() }
+                        StepResult::Success {
+                            message: "分析完成".to_string(),
+                        }
                     }
                     Err(_) => {
                         // 回退：原始文本
                         ctx.analysis_result = Some(raw_result);
-                        StepResult::Success { message: "分析完成".to_string() }
+                        StepResult::Success {
+                            message: "分析完成".to_string(),
+                        }
                     }
                 }
             }
-            Err(e) => StepResult::Failed { error: e.to_string() },
+            Err(e) => StepResult::Failed {
+                error: e.to_string(),
+            },
         }
     }
 }
@@ -71,10 +84,9 @@ fn extract_json(text: &str) -> &str {
         }
     }
     // 尝试找最外层的 {} 块
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            return &text[start..end + 1];
-        }
+    if let Some(start) = text.find('{')
+        && let Some(end) = text.rfind('}') {
+        return &text[start..end + 1];
     }
     text
 }
@@ -82,7 +94,8 @@ fn extract_json(text: &str) -> &str {
 fn format_structured_output(data: &serde_json::Value) -> String {
     match data.get("deploy_status") {
         Some(s) if s.as_str() == Some("success") => {
-            let servers_array: Vec<&str> = data.get("servers")
+            let servers_array: Vec<&str> = data
+                .get("servers")
                 .and_then(|v| v.as_array())
                 .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
                 .unwrap_or_default();
@@ -94,18 +107,27 @@ fn format_structured_output(data: &serde_json::Value) -> String {
             )
         }
         Some(s) if s.as_str() == Some("failed") => {
-            let error = data.get("error").and_then(|v| v.as_str()).unwrap_or("未知错误");
-            let suggestion = data.get("suggestion").and_then(|v| v.as_str()).unwrap_or("");
-            format!(
-                "部署失败: {}\n建议: {}",
-                error, suggestion
-            )
+            let error = data
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知错误");
+            let suggestion = data
+                .get("suggestion")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            format!("部署失败: {}\n建议: {}", error, suggestion)
         }
         _ => {
             // 构建分析结果
-            let build_status = data.get("build_status").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+            let build_status = data
+                .get("build_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UNKNOWN");
             let error = data.get("error").and_then(|v| v.as_str()).unwrap_or("");
-            let suggestion = data.get("suggestion").and_then(|v| v.as_str()).unwrap_or("");
+            let suggestion = data
+                .get("suggestion")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             format!(
                 "构建状态: {}\n错误: {}\n建议: {}",
                 build_status, error, suggestion

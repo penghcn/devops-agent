@@ -1,14 +1,10 @@
 use crate::agent::step::StepChain;
 use crate::agent::steps::{
-    jenkins_trigger::JenkinsTriggerStep,
-    jenkins_wait::JenkinsWaitStep,
-    jenkins_log::JenkinsLogStep,
-    jenkins_status::JenkinsStatusStep,
-    claude_analyze::ClaudeAnalyzeStep,
-    claude_code::ClaudeCodeStep,
-    job_validate::JobValidateStep,
+    claude_analyze::ClaudeAnalyzeStep, claude_code::ClaudeCodeStep, jenkins_log::JenkinsLogStep,
+    jenkins_status::JenkinsStatusStep, jenkins_trigger::JenkinsTriggerStep,
+    jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep,
 };
-use crate::agent::{claude, AgentResponse, StepContext, TaskType};
+use crate::agent::{AgentResponse, StepContext, TaskType, claude};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -18,12 +14,18 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
-    for i in 0..=m { dp[i][0] = i; }
-    for j in 0..=n { dp[0][j] = j; }
+    for (i, row) in dp.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, row) in dp[0].iter_mut().enumerate() {
+        *row = j;
+    }
     for i in 1..=m {
         for j in 1..=n {
-            let cost = if a[i-1] == b[j-1] { 0 } else { 1 };
-            dp[i][j] = (dp[i-1][j]+1).min(dp[i][j-1]+1).min(dp[i-1][j-1]+cost);
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
         }
     }
     dp[m][n]
@@ -31,26 +33,54 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum JobType {
-    Standard,    // 普通 Job
+    Standard, // 普通 Job
     #[default]
-    Branch,      // 多分支 Pipeline
+    Branch, // 多分支 Pipeline
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
-    DeployPipeline { job_name: String, branch: Option<String>, job_type: JobType },
-    BuildPipeline { job_name: String, branch: Option<String>, job_type: JobType },
-    QueryPipeline { job_name: String, branch: Option<String>, job_type: JobType },
-    AnalyzeBuild { job_name: String, branch: Option<String>, job_type: JobType },
+    DeployPipeline {
+        job_name: String,
+        branch: Option<String>,
+        job_type: JobType,
+    },
+    BuildPipeline {
+        job_name: String,
+        branch: Option<String>,
+        job_type: JobType,
+    },
+    QueryPipeline {
+        job_name: String,
+        branch: Option<String>,
+        job_type: JobType,
+    },
+    AnalyzeBuild {
+        job_name: String,
+        branch: Option<String>,
+        job_type: JobType,
+    },
     General,
 }
 
 impl Intent {
     fn branch_is_some(&self) -> bool {
-        matches!(self, Intent::DeployPipeline { branch: Some(_), .. }
-            | Intent::BuildPipeline { branch: Some(_), .. }
-            | Intent::QueryPipeline { branch: Some(_), .. }
-            | Intent::AnalyzeBuild { branch: Some(_), .. })
+        matches!(
+            self,
+            Intent::DeployPipeline {
+                branch: Some(_),
+                ..
+            } | Intent::BuildPipeline {
+                branch: Some(_),
+                ..
+            } | Intent::QueryPipeline {
+                branch: Some(_),
+                ..
+            } | Intent::AnalyzeBuild {
+                branch: Some(_),
+                ..
+            }
+        )
     }
 }
 
@@ -67,12 +97,15 @@ impl IntentRouter {
     /// 1. 正则快速匹配：`部署/构建/查询/分析 {job_name}/{branch}` — 不调用 Claude
     /// 2. 自然语言模糊意图 → 调用 Claude
     /// 3. 无法识别 → General
-    /// 返回 (Intent, 分支修正提示)
+    ///    返回 (Intent, 分支修正提示)
     pub async fn identify(&self, prompt: &str) -> (Intent, Option<(String, String)>) {
         // 第一层：正则快速匹配（不花 token）
         if let Some((action, job_name, branch)) = self.parse_simple(prompt) {
             // 用缓存匹配确认 job_name 是否存在，并拆分组合名称
-            if let Some((intent, correction)) = self.resolve_from_simple(&action, &job_name, branch.as_deref()).await {
+            if let Some((intent, correction)) = self
+                .resolve_from_simple(&action, &job_name, branch.as_deref())
+                .await
+            {
                 return (intent, correction);
             }
         }
@@ -86,7 +119,12 @@ impl IntentRouter {
 
     /// 从正则解析结果中解析 Intent，需要异步获取缓存
     /// 返回 (Intent, 分支修正提示)，如 Some(("de5", "dev")) 表示 de5 被修正为 dev
-    async fn resolve_from_simple(&self, action: &str, raw_job: &str, branch_hint: Option<&str>) -> Option<(Intent, Option<(String, String)>)> {
+    async fn resolve_from_simple(
+        &self,
+        action: &str,
+        raw_job: &str,
+        branch_hint: Option<&str>,
+    ) -> Option<(Intent, Option<(String, String)>)> {
         let cache_data = self.cache.get_cached().await?;
 
         // 尝试拆分：斜杠分隔（raw_job 中已含 /）
@@ -112,55 +150,117 @@ impl IntentRouter {
             let branch = branch.filter(|b| !b.is_empty());
             let mut correction: Option<(String, String)> = None;
 
-            if let Some(b) = &branch {
-                if !cached.branches.contains(b) {
+            if let Some(b) = &branch
+                && !cached.branches.contains(b) {
                     // starts_with 优先
-                    let matched = cached.branches.iter().find(|cb| cb.starts_with(b.as_str()))
-                        .or_else(|| cached.branches.iter().min_by_key(|cb| levenshtein_distance(b, cb)).filter(|cb| levenshtein_distance(b, cb) <= 1));
-                    if let Some(best) = matched {
-                        if best != b.as_str() {
-                            correction = Some((b.clone(), best.clone()));
-                        }
+                    let matched = cached
+                        .branches
+                        .iter()
+                        .find(|cb| cb.starts_with(b.as_str()))
+                        .or_else(|| {
+                            cached
+                                .branches
+                                .iter()
+                                .min_by_key(|cb| levenshtein_distance(b, cb))
+                                .filter(|cb| levenshtein_distance(b, cb) <= 1)
+                        });
+                    if let Some(best) = matched
+                        && best != b.as_str() {
+                        correction = Some((b.clone(), best.clone()));
                     }
                 }
-            }
 
-            let branch = branch.as_ref().and_then(|b| {
-                if cached.branches.contains(b) {
-                    return Some(b.clone());
-                }
-                cached.branches.iter().find(|cb| cb.starts_with(b.as_str()))
-                    .or_else(|| cached.branches.iter().min_by_key(|cb| levenshtein_distance(b, cb)).filter(|cb| levenshtein_distance(b, cb) <= 1))
-                    .cloned()
-            }).or(branch);
+            let branch = branch
+                .as_ref()
+                .and_then(|b| {
+                    if cached.branches.contains(b) {
+                        return Some(b.clone());
+                    }
+                    cached
+                        .branches
+                        .iter()
+                        .find(|cb| cb.starts_with(b.as_str()))
+                        .or_else(|| {
+                            cached
+                                .branches
+                                .iter()
+                                .min_by_key(|cb| levenshtein_distance(b, cb))
+                                .filter(|cb| levenshtein_distance(b, cb) <= 1)
+                        })
+                        .cloned()
+                })
+                .or(branch);
 
             tracing::info!(
                 "Intent regex match: action='{}', job='{}', branch={:?}, correction={:?} (from cache)",
-                action, job_name, branch, correction
+                action,
+                job_name,
+                branch,
+                correction
             );
-            return Some((match action {
-                "deploy" => Intent::DeployPipeline { job_name, branch, job_type: jt },
-                "build" => Intent::BuildPipeline { job_name, branch, job_type: jt },
-                "query" => Intent::QueryPipeline { job_name, branch, job_type: jt },
-                "analyze" => Intent::AnalyzeBuild { job_name, branch, job_type: jt },
-                _ => return None,
-            }, correction.map(|(orig, best)| (orig, best))));
+            return Some((
+                match action {
+                    "deploy" => Intent::DeployPipeline {
+                        job_name,
+                        branch,
+                        job_type: jt,
+                    },
+                    "build" => Intent::BuildPipeline {
+                        job_name,
+                        branch,
+                        job_type: jt,
+                    },
+                    "query" => Intent::QueryPipeline {
+                        job_name,
+                        branch,
+                        job_type: jt,
+                    },
+                    "analyze" => Intent::AnalyzeBuild {
+                        job_name,
+                        branch,
+                        job_type: jt,
+                    },
+                    _ => return None,
+                },
+                correction,
+            ));
         }
 
         // 非多分支，无分支要求
         let branch = branch.filter(|b| !b.is_empty());
         tracing::info!(
             "Intent regex match: action='{}', job='{}', branch={:?} (from cache)",
-            action, job_name, branch
+            action,
+            job_name,
+            branch
         );
 
-        Some((match action {
-            "deploy" => Intent::DeployPipeline { job_name, branch, job_type: jt },
-            "build" => Intent::BuildPipeline { job_name, branch, job_type: jt },
-            "query" => Intent::QueryPipeline { job_name, branch, job_type: jt },
-            "analyze" => Intent::AnalyzeBuild { job_name, branch, job_type: jt },
-            _ => return None,
-        }, None))
+        Some((
+            match action {
+                "deploy" => Intent::DeployPipeline {
+                    job_name,
+                    branch,
+                    job_type: jt,
+                },
+                "build" => Intent::BuildPipeline {
+                    job_name,
+                    branch,
+                    job_type: jt,
+                },
+                "query" => Intent::QueryPipeline {
+                    job_name,
+                    branch,
+                    job_type: jt,
+                },
+                "analyze" => Intent::AnalyzeBuild {
+                    job_name,
+                    branch,
+                    job_type: jt,
+                },
+                _ => return None,
+            },
+            None,
+        ))
     }
 
     /// 第一层：正则快速解析（不花 token）
@@ -172,9 +272,13 @@ impl IntentRouter {
         // 动作关键词（注意顺序：query/analyze 在 build 之前，避免"查询构建状态"被误判为 build）
         let action = if prompt.contains("部署") || prompt.contains("发布") {
             "deploy"
-        } else if prompt.contains("分析") || prompt.contains("查看日志") || prompt.contains("看日志") {
+        } else if prompt.contains("分析")
+            || prompt.contains("查看日志")
+            || prompt.contains("看日志")
+        {
             "analyze"
-        } else if prompt.contains("查询") || prompt.contains("查看") || prompt.contains("状态") {
+        } else if prompt.contains("查询") || prompt.contains("查看") || prompt.contains("状态")
+        {
             "query"
         } else if prompt.contains("构建") || prompt.contains("编译") {
             "build"
@@ -247,9 +351,7 @@ impl IntentRouter {
         );
 
         match claude::call_claude_code(&intent_prompt, "").await {
-            Ok(response) => {
-                parse_intent_json(&response).ok()
-            }
+            Ok(response) => parse_intent_json(&response).ok(),
             Err(_) => None,
         }
     }
@@ -265,7 +367,9 @@ impl IntentRouter {
         }
 
         let (raw_job, _) = Self::extract_fields(&intent);
-        let Some(raw_job) = raw_job else { return intent };
+        let Some(raw_job) = raw_job else {
+            return intent;
+        };
 
         let cache_data = match self.cache.get_cached().await {
             Some(c) => c,
@@ -273,14 +377,20 @@ impl IntentRouter {
         };
 
         // 尝试拆分：斜杠分隔
-        if let Some((job, branch)) = raw_job.split_once('/') {
-            if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
+        if let Some((job, branch)) = raw_job.split_once('/')
+            && let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
                 tracing::info!(
                     "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
-                    raw_job, job, branch
+                    raw_job,
+                    job,
+                    branch
                 );
-                return self.replace_branch(&intent, job.to_string(), Some(branch.to_string()), &cached.job_type);
-            }
+                return self.replace_branch(
+                    &intent,
+                    job.to_string(),
+                    Some(branch.to_string()),
+                    &cached.job_type,
+                );
         }
 
         // 尝试拆分：空格分隔
@@ -292,7 +402,9 @@ impl IntentRouter {
                 if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
                     tracing::info!(
                         "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split)",
-                        raw_job, job, branch
+                        raw_job,
+                        job,
+                        branch
                     );
                     return self.replace_branch(&intent, job, Some(branch), &cached.job_type);
                 }
@@ -307,17 +419,39 @@ impl IntentRouter {
         intent
     }
 
-    fn replace_branch(&self, intent: &Intent, job_name: String, branch: Option<String>, job_type: &str) -> Intent {
+    fn replace_branch(
+        &self,
+        intent: &Intent,
+        job_name: String,
+        branch: Option<String>,
+        job_type: &str,
+    ) -> Intent {
         let jt = if job_type == "pipeline_multibranch" || job_type == "branch" {
             JobType::Branch
         } else {
             JobType::Standard
         };
         match intent {
-            Intent::DeployPipeline { .. } => Intent::DeployPipeline { job_name, branch, job_type: jt },
-            Intent::BuildPipeline { .. } => Intent::BuildPipeline { job_name, branch, job_type: jt },
-            Intent::QueryPipeline { .. } => Intent::QueryPipeline { job_name, branch, job_type: jt },
-            Intent::AnalyzeBuild { .. } => Intent::AnalyzeBuild { job_name, branch, job_type: jt },
+            Intent::DeployPipeline { .. } => Intent::DeployPipeline {
+                job_name,
+                branch,
+                job_type: jt,
+            },
+            Intent::BuildPipeline { .. } => Intent::BuildPipeline {
+                job_name,
+                branch,
+                job_type: jt,
+            },
+            Intent::QueryPipeline { .. } => Intent::QueryPipeline {
+                job_name,
+                branch,
+                job_type: jt,
+            },
+            Intent::AnalyzeBuild { .. } => Intent::AnalyzeBuild {
+                job_name,
+                branch,
+                job_type: jt,
+            },
             Intent::General => Intent::General,
         }
     }
@@ -325,56 +459,49 @@ impl IntentRouter {
     /// 根据 Intent 返回对应的 StepChain
     pub fn to_chain_with_prompt(&self, intent: &Intent, prompt: &str) -> StepChain {
         match intent {
-            Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => {
-                StepChain::new(vec![
-                    Box::new(JobValidateStep),
-                    Box::new(JenkinsTriggerStep),
-                    Box::new(JenkinsWaitStep::default()),
-                    Box::new(JenkinsLogStep),
-                    Box::new(ClaudeAnalyzeStep::default()),
-                ])
-            }
+            Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
+                Box::new(JobValidateStep),
+                Box::new(JenkinsTriggerStep),
+                Box::new(JenkinsWaitStep::default()),
+                Box::new(JenkinsLogStep),
+                Box::new(ClaudeAnalyzeStep),
+            ]),
             Intent::QueryPipeline { .. } => {
-                StepChain::new(vec![
-                    Box::new(JobValidateStep),
-                    Box::new(JenkinsStatusStep),
-                ])
+                StepChain::new(vec![Box::new(JobValidateStep), Box::new(JenkinsStatusStep)])
             }
-            Intent::AnalyzeBuild { .. } => {
-                StepChain::new(vec![
-                    Box::new(JobValidateStep),
-                    Box::new(JenkinsLogStep),
-                    Box::new(ClaudeAnalyzeStep::default()),
-                ])
-            }
-            Intent::General => {
-                StepChain::new(vec![
-                    Box::new(ClaudeCodeStep {
-                        prompt: prompt.to_string(),
-                        allowed_tools: "Bash,Read,Write".to_string(),
-                    }),
-                ])
-            }
+            Intent::AnalyzeBuild { .. } => StepChain::new(vec![
+                Box::new(JobValidateStep),
+                Box::new(JenkinsLogStep),
+                Box::new(ClaudeAnalyzeStep),
+            ]),
+            Intent::General => StepChain::new(vec![Box::new(ClaudeCodeStep {
+                prompt: prompt.to_string(),
+                allowed_tools: "Bash,Read,Write".to_string(),
+            })]),
         }
     }
 
     /// 从 Intent 中提取 job_name 和 branch
     fn extract_fields(intent: &Intent) -> (Option<String>, Option<String>) {
         match intent {
-            Intent::DeployPipeline { job_name, branch, .. }
-            | Intent::BuildPipeline { job_name, branch, .. }
-            | Intent::QueryPipeline { job_name, branch, .. }
-            | Intent::AnalyzeBuild { job_name, branch, .. } => (Some(job_name.clone()), branch.clone()),
+            Intent::DeployPipeline {
+                job_name, branch, ..
+            }
+            | Intent::BuildPipeline {
+                job_name, branch, ..
+            }
+            | Intent::QueryPipeline {
+                job_name, branch, ..
+            }
+            | Intent::AnalyzeBuild {
+                job_name, branch, ..
+            } => (Some(job_name.clone()), branch.clone()),
             Intent::General => (None, None),
         }
     }
 
     /// 完整流程：识别意图 + 执行 StepChain
-    pub async fn execute(
-        &self,
-        prompt: &str,
-        task_type: TaskType,
-    ) -> AgentResponse {
+    pub async fn execute(&self, prompt: &str, task_type: TaskType) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, branch_correction) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
@@ -389,7 +516,9 @@ impl IntentRouter {
             job_name,
             branch,
             Arc::new(crate::config::Config::from_env()),
-        ).with_cache(self.cache.clone()).with_identify_elapsed(identify_elapsed);
+        )
+        .with_cache(self.cache.clone())
+        .with_identify_elapsed(identify_elapsed);
         let ctx = if let Some((orig, corrected)) = &branch_correction {
             ctx.with_branch_correction(format!("原始分支 '{}' 已修正为 '{}'", orig, corrected))
         } else {
@@ -398,22 +527,25 @@ impl IntentRouter {
 
         let (final_ctx, steps) = chain.execute(ctx).await;
 
-        let success = final_ctx.steps.iter().any(|s| {
-            s.result.contains("成功") || s.result.contains("完成")
-        });
+        let success = final_ctx
+            .steps
+            .iter()
+            .any(|s| s.result.contains("成功") || s.result.contains("完成"));
 
         // 优先返回第一条失败/中止信息，否则返回分析结果或最后一步
-        let output = final_ctx.steps.iter().find(|s| {
-            s.result.contains("失败") || s.result.contains("中止")
-        }).map(|s| s.result.clone())
-        .or_else(|| final_ctx.analysis_result.clone())
-        .unwrap_or_else(|| {
-            final_ctx
-                .steps
-                .last()
-                .map(|s| s.result.clone())
-                .unwrap_or_else(|| "处理完成".to_string())
-        });
+        let output = final_ctx
+            .steps
+            .iter()
+            .find(|s| s.result.contains("失败") || s.result.contains("中止"))
+            .map(|s| s.result.clone())
+            .or_else(|| final_ctx.analysis_result.clone())
+            .unwrap_or_else(|| {
+                final_ctx
+                    .steps
+                    .last()
+                    .map(|s| s.result.clone())
+                    .unwrap_or_else(|| "处理完成".to_string())
+            });
 
         AgentResponse {
             success,

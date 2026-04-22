@@ -1,16 +1,14 @@
-use axum::{
-    extract::State,
-    routing::{get, post},
-    Router,
-    Json,
-    response::IntoResponse,
-};
 use axum::serve;
-use tower_http::cors::{CorsLayer, Any};
+use axum::{
+    Json, Router,
+    extract::State,
+    response::IntoResponse,
+    routing::{get, post},
+};
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 
-use devops_agent;
-use devops_agent::tools::jenkins_cache::{JenkinsCacheManager, JenkinsCache};
+use devops_agent::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 
 #[derive(Clone)]
 struct AppState {
@@ -83,13 +81,12 @@ async fn handle_agent(
     State(state): State<Arc<AppState>>,
     Json(req): Json<devops_agent::agent::AgentRequest>,
 ) -> impl IntoResponse {
-    let response = devops_agent::agent::process_request(req, &state.config, state.cache_manager.clone()).await;
+    let response =
+        devops_agent::agent::process_request(req, &state.config, state.cache_manager.clone()).await;
     Json(response)
 }
 
-async fn handle_cache(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn handle_cache(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let cache = state.cache_manager.get_cached().await;
     match cache {
         Some(c) => Json(c),

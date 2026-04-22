@@ -1,7 +1,10 @@
-use base64::Engine;
-use reqwest::{Client, header::{HeaderMap, HeaderValue, AUTHORIZATION}};
-use anyhow::{Result, bail, Context};
 use crate::config::Config;
+use anyhow::{Context, Result, bail};
+use base64::Engine;
+use reqwest::{
+    Client,
+    header::{AUTHORIZATION, HeaderMap, HeaderValue},
+};
 
 /// 校验 Jenkins Job 名称，防止路径注入
 /// Jenkins Job 名称只允许: 字母、数字、连字符、下划线、斜杠(文件夹)、点
@@ -12,33 +15,39 @@ pub fn sanitize_job_name(name: &str) -> Result<&str> {
     if name.contains("..") || name.contains('\0') || name.contains('\n') {
         bail!("Invalid job name: contains dangerous characters");
     }
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/' || c == '.') {
-        bail!("Invalid job name: contains invalid characters (only alphanumeric, -, _, /, . allowed)");
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/' || c == '.')
+    {
+        bail!(
+            "Invalid job name: contains invalid characters (only alphanumeric, -, _, /, . allowed)"
+        );
     }
     Ok(name)
 }
 
 /// 触发 Jenkins Job
-/// 
+///
 /// 设计决策：提供原子化的工具函数，让 Claude Code 调用，
 /// 而非让 Claude 自己写 curl 命令。原因：
 /// 1. 封装认证逻辑，避免泄露 Token
 /// 2. 统一错误处理
 /// 3. 便于审计和日志记录
-pub async fn trigger_job(job_name: &str, params: &serde_json::Value, config: &Config) -> Result<String> {
+pub async fn trigger_job(
+    job_name: &str,
+    params: &serde_json::Value,
+    config: &Config,
+) -> Result<String> {
     let job_name = sanitize_job_name(job_name)?;
     let client = Client::new();
 
     // 构建 Basic Auth
-    let auth_value = format!(
-        "{}:{}",
-        config.jenkins_user, config.jenkins_token
-    );
+    let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&format!("Basic {}", encoded))?
+        HeaderValue::from_str(&format!("Basic {}", encoded))?,
     );
 
     // 触发构建
@@ -46,14 +55,14 @@ pub async fn trigger_job(job_name: &str, params: &serde_json::Value, config: &Co
         "{}/job/{}/buildWithParameters",
         config.jenkins_url, job_name
     );
-    
+
     let response = client
         .post(&url)
         .headers(headers)
         .json(params)
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         // 获取 Queue ID 用于后续查询
         let location = response
@@ -114,10 +123,7 @@ pub async fn check_job_exists(
     match response.status().as_u16() {
         200 => {
             let body: serde_json::Value = response.json().await?;
-            let class = body
-                .get("_class")
-                .and_then(|c| c.as_str())
-                .unwrap_or("");
+            let class = body.get("_class").and_then(|c| c.as_str()).unwrap_or("");
             let name = body
                 .get("name")
                 .and_then(|n| n.as_str())
@@ -143,13 +149,12 @@ pub async fn get_job_status(job_name: &str, config: &Config) -> Result<serde_jso
         HeaderValue::from_str(&format!("Basic {}", encoded))?,
     );
 
-    let url = format!("{}/job/{}/api/json?fields=id,status,color", config.jenkins_url, job_name);
+    let url = format!(
+        "{}/job/{}/api/json?fields=id,status,color",
+        config.jenkins_url, job_name
+    );
 
-    let response = client
-        .get(&url)
-        .headers(headers)
-        .send()
-        .await?;
+    let response = client.get(&url).headers(headers).send().await?;
 
     if response.status().is_success() {
         let body = response.json::<serde_json::Value>().await?;
@@ -208,7 +213,10 @@ pub async fn trigger_pipeline(
                 "{}/job/{}/job/{}/{}",
                 config.jenkins_url, job_name, branch_str, build_num
             );
-            return Ok(format!("Pipeline triggered successfully. Build URL: {}", url));
+            return Ok(format!(
+                "Pipeline triggered successfully. Build URL: {}",
+                url
+            ));
         }
         Ok(resp) => {
             tracing::warn!(
@@ -217,7 +225,10 @@ pub async fn trigger_pipeline(
             );
         }
         Err(e) => {
-            tracing::warn!("HTTP API trigger error ({:?}), falling back to Jenkins CLI", e);
+            tracing::warn!(
+                "HTTP API trigger error ({:?}), falling back to Jenkins CLI",
+                e
+            );
         }
     }
 
@@ -266,7 +277,10 @@ pub async fn trigger_pipeline(
         config.jenkins_url, job_name, branch_str, build_num
     );
 
-    Ok(format!("Pipeline triggered successfully. Build URL: {}", url))
+    Ok(format!(
+        "Pipeline triggered successfully. Build URL: {}",
+        url
+    ))
 }
 
 /// 下载/缓存 jenkins-cli.jar
@@ -302,11 +316,7 @@ pub async fn get_cli_jar(config: &Config) -> Result<String> {
         HeaderValue::from_str(&format!("Basic {}", encoded))?,
     );
 
-    let response = client
-        .get(&jar_url)
-        .headers(headers)
-        .send()
-        .await?;
+    let response = client.get(&jar_url).headers(headers).send().await?;
 
     if !response.status().is_success() {
         anyhow::bail!("Failed to download jenkins-cli.jar: {}", response.status());
@@ -345,11 +355,7 @@ async fn get_latest_build_number(
         ),
     };
 
-    let response = client
-        .get(&url)
-        .headers(headers)
-        .send()
-        .await?;
+    let response = client.get(&url).headers(headers).send().await?;
 
     let status = response.status();
     if !status.is_success() {
@@ -398,11 +404,7 @@ pub async fn get_pipeline_status(
     );
     tracing::info!("get_pipeline_status URL: {}", url);
 
-    let response = client
-        .get(&url)
-        .headers(headers.clone())
-        .send()
-        .await?;
+    let response = client.get(&url).headers(headers.clone()).send().await?;
 
     let status_code = response.status();
     let body_text = response.text().await?;
@@ -465,20 +467,23 @@ pub async fn wait_for_pipeline(
         };
 
         // 检查 inProgress 字段
-        if let Some(in_progress) = status.get("inProgress").and_then(|v| v.as_bool()) {
-            if !in_progress {
-                // 构建完成
-                tracing::info!("Pipeline #{} completed in {}s", build_number, elapsed);
-                return Ok(status);
-            }
+  if let Some(in_progress) = status.get("inProgress").and_then(|v| v.as_bool())
+            && !in_progress {
+            // 构建完成
+            tracing::info!("Pipeline #{} completed in {}s", build_number, elapsed);
+            return Ok(status);
         }
 
         // 检查 result 字段（某些 Job 类型可能没有 inProgress）
-        if let Some(result) = status.get("result").and_then(|v| v.as_str()) {
-            if !result.is_empty() {
-                tracing::info!("Pipeline #{} completed with result: {} in {}s", build_number, result, elapsed);
-                return Ok(status);
-            }
+       if let Some(result) = status.get("result").and_then(|v| v.as_str())
+            && !result.is_empty() {
+            tracing::info!(
+                "Pipeline #{} completed with result: {} in {}s",
+                build_number,
+                result,
+                elapsed
+            );
+            return Ok(status);
         }
 
         // 等待后继续轮询
@@ -486,7 +491,11 @@ pub async fn wait_for_pipeline(
         elapsed += poll_interval_secs;
     }
 
-    anyhow::bail!("Pipeline #{} did not complete within {} seconds", build_number, max_wait_secs)
+    anyhow::bail!(
+        "Pipeline #{} did not complete within {} seconds",
+        build_number,
+        max_wait_secs
+    )
 }
 
 /// 获取指定构建的 console 日志
@@ -513,16 +522,16 @@ pub async fn get_build_log(
         config.jenkins_url, job_name, branch, build_number
     );
 
-    let response = client
-        .get(&url)
-        .headers(headers)
-        .send()
-        .await?;
+    let response = client.get(&url).headers(headers).send().await?;
 
     if response.status().is_success() {
         let log = response.text().await?;
         Ok(log)
     } else {
-        anyhow::bail!("Failed to get build log: {} ({})", response.status(), response.text().await?)
+        anyhow::bail!(
+            "Failed to get build log: {} ({})",
+            response.status(),
+            response.text().await?
+        )
     }
 }

@@ -1,9 +1,13 @@
-use reqwest::Client;
 use anyhow::Result;
+use reqwest::Client;
 
 /// GitLab API 封装
 /// 提供原子化的 GitLab 操作函数，让 Claude Code 调用
-pub async fn get_pipeline_status(project_id: &str, pipeline_id: &str, token: &str) -> Result<serde_json::Value> {
+pub async fn get_pipeline_status(
+    project_id: &str,
+    pipeline_id: &str,
+    token: &str,
+) -> Result<serde_json::Value> {
     let client = Client::new();
     let url = format!(
         "https://gitlab.com/api/v4/projects/{}/pipelines/{}/status",

@@ -13,7 +13,11 @@ impl Step for JenkinsTriggerStep {
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let job_name = match &ctx.job_name {
             Some(name) => name.clone(),
-            None => return StepResult::Abort { reason: "未提供 job_name".to_string() },
+            None => {
+                return StepResult::Abort {
+                    reason: "未提供 job_name".to_string(),
+                };
+            }
         };
 
         let branch = ctx.branch.as_deref();
@@ -30,15 +34,16 @@ impl Step for JenkinsTriggerStep {
                     StepResult::Success { message }
                 }
             }
-            Err(e) => StepResult::Failed { error: e.to_string() },
+            Err(e) => StepResult::Failed {
+                error: e.to_string(),
+            },
         }
     }
 }
 
 /// 从 Jenkins 返回消息中提取构建号
 fn extract_build_number(msg: &str) -> Option<u32> {
-    msg.split('/')
-        .filter(|s| s.parse::<u32>().is_ok())
-        .next()
+  msg.split('/')
+        .find(|s| s.parse::<u32>().is_ok())
         .and_then(|s| s.parse::<u32>().ok())
 }
