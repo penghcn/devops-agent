@@ -19,7 +19,7 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     // 初始化日志（使用本地时区）
-    if let Err(e) = yunli::setup_logger_debug() {
+    if let Err(e) = yunli::setup_logger() {
         tracing::error!("Init log error: {}", e);
     }
 
