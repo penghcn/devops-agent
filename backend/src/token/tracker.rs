@@ -63,7 +63,13 @@ impl TokenTracker {
 
     /// 返回剩余预算
     pub fn remaining(&self) -> u32 {
-        self.budget.saturating_sub(self.usage().total_tokens)
+        let state = self.state.lock().unwrap();
+        self.budget.saturating_sub(state.total_usage.total_tokens)
+    }
+
+    /// 返回预算上限
+    pub fn budget(&self) -> u32 {
+        self.budget
     }
 
     /// 判断是否已超预算

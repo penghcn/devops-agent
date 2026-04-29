@@ -26,7 +26,7 @@ impl MemoryStore {
     /// 插入记忆条目
     pub fn insert(&self, content: &str, type_: &str, keywords: &[&str], score: f64) -> Result<i64> {
         let keywords_str = keywords.join(",");
-        let created_at = chrono::Utc::now().to_rfc3339();
+        let created_at = chrono::Local::now().to_rfc3339();
 
         self.conn.execute(
             "INSERT INTO memories (content, type, keywords, score, created_at)

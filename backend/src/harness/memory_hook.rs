@@ -27,7 +27,7 @@ impl MemoryHook {
 #[async_trait]
 impl Hook for MemoryHook {
     async fn on(&self, point: HookPoint) -> anyhow::Result<()> {
-        let mut memory = self.memory.lock().unwrap();
+        let mut memory = self.memory.lock().map_err(|_| anyhow::anyhow!("MemoryHook mutex poisoned"))?;
 
         match point {
             HookPoint::SessionStart => {

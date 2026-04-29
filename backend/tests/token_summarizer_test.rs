@@ -49,7 +49,7 @@ fn summarizer_summarize_local() {
 
     assert!(!result.summary.is_empty());
     assert!(result.compressed_tokens < result.original_tokens);
-    assert!(result.key_decisions.is_empty() || !result.key_decisions.is_empty());
+    assert!(result.key_decisions.is_empty());
 }
 
 #[test]

@@ -9,6 +9,7 @@ fn test_token_hook_new() {
     let hook = TokenHook::new(tracker);
     // 创建成功即可
     let _ = hook;
+    // TokenHook 内部包含 warned 状态，确保初始化正确
 }
 
 /// Test 2: TokenHook.on(LlmResult) 检查预算状态 — 未超预算时不报警

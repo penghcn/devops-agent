@@ -11,7 +11,7 @@ pub struct LongTermMemory {
 impl LongTermMemory {
     /// 创建长期记忆实例，连接到指定路径的 SQLite 数据库
     pub fn new(path: &str) -> Result<Self> {
-        let store = MemoryStore::new(path).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let store = MemoryStore::new(path)?;
         Ok(Self { store })
     }
 
@@ -32,16 +32,12 @@ impl LongTermMemory {
             MemoryType::Summary => "Summary",
         };
 
-        self.store
-            .insert(content, type_str, keywords, score)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        self.store.insert(content, type_str, keywords, score)?;
         Ok(())
     }
 
     /// 按关键词检索长期记忆
     pub fn retrieve(&self, keyword: &str) -> Result<Vec<String>> {
-        self.store
-            .search(keyword)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))
+        Ok(self.store.search(keyword)?)
     }
 }
