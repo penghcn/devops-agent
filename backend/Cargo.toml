@@ -28,10 +28,12 @@ reqwest = { version = "0.12", features = ["json"] }  # HTTP 客户端
 tokio-util = "0.7"    # 异步运行时工具
 base64 = "0.22"       # Jenkins Basic Auth
 uuid = { version = "1", features = ["v4"] }  # Session IDs
+rusqlite = { version = "0.32", features = ["bundled"] }  # SQLite 持久化
 
 [dev-dependencies]
 ctor = "0.2"
 anyhow = "1"
+tempfile = "3"
 
 #使用一个临时的 Ad-hoc 签名
 [package.metadata.build]
