@@ -24,13 +24,7 @@ impl MemoryStore {
     }
 
     /// 插入记忆条目
-    pub fn insert(
-        &self,
-        content: &str,
-        type_: &str,
-        keywords: &[&str],
-        score: f64,
-    ) -> Result<i64> {
+    pub fn insert(&self, content: &str, type_: &str, keywords: &[&str], score: f64) -> Result<i64> {
         let keywords_str = keywords.join(",");
         let created_at = chrono::Utc::now().to_rfc3339();
 
@@ -66,9 +60,9 @@ impl MemoryStore {
 
     /// 返回总条目数
     pub fn count(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM memories", [], |row| {
-            row.get(0)
-        })?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
         Ok(count)
     }
 }

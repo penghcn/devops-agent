@@ -42,7 +42,7 @@ impl Step for ClaudeAnalyzeStep {
             Ok(raw_result) => {
                 // 尝试从 Claude 响应中提取 JSON 块
                 let json_str = extract_json(&raw_result);
-    match serde_json::from_str::<serde_json::Value>(json_str) {
+                match serde_json::from_str::<serde_json::Value>(json_str) {
                     Ok(structured) => {
                         ctx.structured_analysis = Some(structured.clone());
                         // 同时生成一段人类可读的文本
@@ -85,7 +85,8 @@ fn extract_json(text: &str) -> &str {
     }
     // 尝试找最外层的 {} 块
     if let Some(start) = text.find('{')
-        && let Some(end) = text.rfind('}') {
+        && let Some(end) = text.rfind('}')
+    {
         return &text[start..end + 1];
     }
     text

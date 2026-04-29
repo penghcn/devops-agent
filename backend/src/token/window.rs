@@ -73,8 +73,7 @@ impl ContextWindow {
 
     /// 计算总 Token 数
     pub fn total_tokens(&self) -> u32 {
-        self.system
-            .token_estimate()
+        self.system.token_estimate()
             + self.compressed.token_estimate()
             + self.structured.token_estimate()
             + self.linear.token_estimate()
