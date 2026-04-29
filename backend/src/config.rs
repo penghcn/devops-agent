@@ -26,4 +26,16 @@ impl Config {
             claude_code_path: env::var("CLAUDE_CODE_PATH").unwrap_or_else(|_| "claude".to_string()),
         }
     }
+
+    #[cfg(test)]
+    pub fn test_default() -> Self {
+        Self {
+            jenkins_url: "http://localhost:8080".to_string(),
+            jenkins_user: "test-user".to_string(),
+            jenkins_token: "test-token".to_string(),
+            gitlab_url: "https://gitlab.com".to_string(),
+            gitlab_token: "test-token".to_string(),
+            claude_code_path: "claude".to_string(),
+        }
+    }
 }
