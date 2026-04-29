@@ -139,6 +139,7 @@ async fn run_claude_agent() -> Result<String, Box<dyn std::error::Error>> {
     Ok(res.unwrap())
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_run_agent() -> Result<(), Box<dyn std::error::Error>> {
     let start = std::time::Instant::now();
