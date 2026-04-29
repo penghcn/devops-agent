@@ -1,5 +1,5 @@
-use super::store::MemoryStore;
 use super::MemoryType;
+use super::store::MemoryStore;
 use anyhow::Result;
 
 /// 长期记忆，封装 SQLite 持久化

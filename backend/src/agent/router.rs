@@ -151,24 +151,26 @@ impl IntentRouter {
             let mut correction: Option<(String, String)> = None;
 
             if let Some(b) = &branch
-                && !cached.branches.contains(b) {
-                    // starts_with 优先
-                    let matched = cached
-                        .branches
-                        .iter()
-                        .find(|cb| cb.starts_with(b.as_str()))
-                        .or_else(|| {
-                            cached
-                                .branches
-                                .iter()
-                                .min_by_key(|cb| levenshtein_distance(b, cb))
-                                .filter(|cb| levenshtein_distance(b, cb) <= 1)
-                        });
-                    if let Some(best) = matched
-                        && best != b.as_str() {
-                        correction = Some((b.clone(), best.clone()));
-                    }
+                && !cached.branches.contains(b)
+            {
+                // starts_with 优先
+                let matched = cached
+                    .branches
+                    .iter()
+                    .find(|cb| cb.starts_with(b.as_str()))
+                    .or_else(|| {
+                        cached
+                            .branches
+                            .iter()
+                            .min_by_key(|cb| levenshtein_distance(b, cb))
+                            .filter(|cb| levenshtein_distance(b, cb) <= 1)
+                    });
+                if let Some(best) = matched
+                    && best != b.as_str()
+                {
+                    correction = Some((b.clone(), best.clone()));
                 }
+            }
 
             let branch = branch
                 .as_ref()
@@ -378,19 +380,20 @@ impl IntentRouter {
 
         // 尝试拆分：斜杠分隔
         if let Some((job, branch)) = raw_job.split_once('/')
-            && let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
-                tracing::info!(
-                    "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
-                    raw_job,
-                    job,
-                    branch
-                );
-                return self.replace_branch(
-                    &intent,
-                    job.to_string(),
-                    Some(branch.to_string()),
-                    &cached.job_type,
-                );
+            && let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job)
+        {
+            tracing::info!(
+                "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
+                raw_job,
+                job,
+                branch
+            );
+            return self.replace_branch(
+                &intent,
+                job.to_string(),
+                Some(branch.to_string()),
+                &cached.job_type,
+            );
         }
 
         // 尝试拆分：空格分隔

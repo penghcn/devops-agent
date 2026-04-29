@@ -33,7 +33,9 @@ async fn test_orchestrator_runs_hooks() {
     }
 
     let mut orchestrator = Orchestrator::new();
-    orchestrator.add_hook(Arc::new(CountingHook { counter: counter.clone() }));
+    orchestrator.add_hook(Arc::new(CountingHook {
+        counter: counter.clone(),
+    }));
 
     // 空步骤链: SessionStart + SessionEnd = 2 次
     orchestrator.run(&[]).await.unwrap();
@@ -179,8 +181,5 @@ async fn test_orchestrator_step_failure() {
     // 验证: SessionStart → StepStart → StepEnd (失败仍然触发 StepEnd)
     // SessionEnd 不应该被触发
     let order = order.lock().unwrap();
-    assert_eq!(
-        *order,
-        vec!["SessionStart", "StepStart", "StepEnd"]
-    );
+    assert_eq!(*order, vec!["SessionStart", "StepStart", "StepEnd"]);
 }

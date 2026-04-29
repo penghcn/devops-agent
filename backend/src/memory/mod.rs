@@ -2,8 +2,8 @@ pub mod long_term;
 pub mod short_term;
 pub mod store;
 
-pub use short_term::ShortTermMemory;
 pub use long_term::LongTermMemory;
+pub use short_term::ShortTermMemory;
 pub use store::MemoryStore;
 
 use chrono::DateTime;

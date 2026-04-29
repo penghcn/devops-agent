@@ -43,7 +43,7 @@ impl Step for JenkinsTriggerStep {
 
 /// 从 Jenkins 返回消息中提取构建号
 fn extract_build_number(msg: &str) -> Option<u32> {
-  msg.split('/')
+    msg.split('/')
         .find(|s| s.parse::<u32>().is_ok())
         .and_then(|s| s.parse::<u32>().ok())
 }

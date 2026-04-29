@@ -44,8 +44,8 @@ fn test_hookpoint_has_all_variants() {
 fn test_hookpoint_traits() {
     let p1 = HookPoint::SessionStart;
     let p2 = p1.clone(); // Clone
-    let p3 = p1;          // Copy
-    assert_eq!(p1, p2);   // PartialEq
+    let p3 = p1; // Copy
+    assert_eq!(p1, p2); // PartialEq
     assert_eq!(p1, p3);
     let _debug = format!("{:?}", p1); // Debug
 }

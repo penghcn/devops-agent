@@ -467,16 +467,18 @@ pub async fn wait_for_pipeline(
         };
 
         // 检查 inProgress 字段
-  if let Some(in_progress) = status.get("inProgress").and_then(|v| v.as_bool())
-            && !in_progress {
+        if let Some(in_progress) = status.get("inProgress").and_then(|v| v.as_bool())
+            && !in_progress
+        {
             // 构建完成
             tracing::info!("Pipeline #{} completed in {}s", build_number, elapsed);
             return Ok(status);
         }
 
         // 检查 result 字段（某些 Job 类型可能没有 inProgress）
-       if let Some(result) = status.get("result").and_then(|v| v.as_str())
-            && !result.is_empty() {
+        if let Some(result) = status.get("result").and_then(|v| v.as_str())
+            && !result.is_empty()
+        {
             tracing::info!(
                 "Pipeline #{} completed with result: {} in {}s",
                 build_number,

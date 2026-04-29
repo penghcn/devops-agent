@@ -109,7 +109,7 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
     let b_len = b.len();
     let mut dp = vec![vec![0usize; b_len + 1]; a_len + 1];
 
- for (i, row) in dp.iter_mut().enumerate() {
+    for (i, row) in dp.iter_mut().enumerate() {
         row[0] = i;
     }
     for (j, cell) in dp[0].iter_mut().enumerate() {

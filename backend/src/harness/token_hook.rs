@@ -24,8 +24,7 @@ impl Hook for TokenHook {
             tracing::warn!(
                 "Token budget exceeded: {} / {}",
                 self.tracker.usage().total_tokens,
-                self.tracker.usage().total_tokens
-                    + self.tracker.remaining()
+                self.tracker.usage().total_tokens + self.tracker.remaining()
             );
         }
         Ok(())
