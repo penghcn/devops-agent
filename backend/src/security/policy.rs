@@ -14,6 +14,12 @@ pub struct PolicyEngine {
     rules: Vec<PolicyRule>,
 }
 
+impl Default for PolicyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PolicyEngine {
     /// 创建策略引擎，加载默认策略表
     pub fn new() -> Self {
