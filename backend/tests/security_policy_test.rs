@@ -1,9 +1,18 @@
-use devops_agent::security::{PolicyDecision, PolicyEngine, PolicyRule, Role, ToolName, ToolRequest};
+use devops_agent::security::{
+    AuditLog, PolicyDecision, PolicyEngine, PolicyRule, Role, ToolName, ToolRequest,
+};
+use std::sync::Arc;
 
 #[test]
 fn test_admin_allows_all_tools() {
-    let engine = PolicyEngine::new();
-    let tools = [ToolName::Read, ToolName::Write, ToolName::Bash, ToolName::Git];
+    let audit_log = AuditLog::new();
+    let engine = PolicyEngine::new(Arc::new(audit_log));
+    let tools = [
+        ToolName::Read,
+        ToolName::Write,
+        ToolName::Bash,
+        ToolName::Git,
+    ];
 
     for tool in tools {
         let req = ToolRequest::new(Role::Admin, tool, None, vec![]);
@@ -13,7 +22,8 @@ fn test_admin_allows_all_tools() {
 
 #[test]
 fn test_viewer_allows_read_only() {
-    let engine = PolicyEngine::new();
+    let audit_log = AuditLog::new();
+    let engine = PolicyEngine::new(Arc::new(audit_log));
 
     let read_req = ToolRequest::new(Role::Viewer, ToolName::Read, None, vec![]);
     assert_eq!(engine.check(&read_req), PolicyDecision::Allow);
@@ -30,7 +40,8 @@ fn test_viewer_allows_read_only() {
 
 #[test]
 fn test_developer_read_write_git_allow_bash_prompt() {
-    let engine = PolicyEngine::new();
+    let audit_log = AuditLog::new();
+    let engine = PolicyEngine::new(Arc::new(audit_log));
 
     let read_req = ToolRequest::new(Role::Developer, ToolName::Read, None, vec![]);
     assert_eq!(engine.check(&read_req), PolicyDecision::Allow);
@@ -47,15 +58,16 @@ fn test_developer_read_write_git_allow_bash_prompt() {
 
 #[test]
 fn test_policy_engine_new_creates_default_rules() {
-    let engine = PolicyEngine::new();
-    // Default rules should be loaded — engine should not panic on check
+    let audit_log = AuditLog::new();
+    let engine = PolicyEngine::new(Arc::new(audit_log));
     let req = ToolRequest::new(Role::Admin, ToolName::Read, None, vec![]);
     let _ = engine.check(&req);
 }
 
 #[test]
 fn test_add_rule_overrides_default() {
-    let mut engine = PolicyEngine::new();
+    let audit_log = AuditLog::new();
+    let mut engine = PolicyEngine::new(Arc::new(audit_log));
 
     // By default, Viewer + Read = Allow
     let req = ToolRequest::new(Role::Viewer, ToolName::Read, None, vec![]);
@@ -73,7 +85,8 @@ fn test_add_rule_overrides_default() {
 
 #[test]
 fn test_custom_rule_priority() {
-    let mut engine = PolicyEngine::new();
+    let audit_log = AuditLog::new();
+    let mut engine = PolicyEngine::new(Arc::new(audit_log));
 
     // Add rule: Developer + Bash = Allow (override default Prompt)
     engine.add_rule(PolicyRule {

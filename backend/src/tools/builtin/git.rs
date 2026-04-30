@@ -54,8 +54,14 @@ impl Tool for GitTool {
             input.arguments.clone(),
         );
         let decision = self.policy_engine.check(&request);
-        if decision == PolicyDecision::Deny {
-            return ToolOutput::fail("策略拒绝：无权执行 Git 命令".into());
+        match decision {
+            PolicyDecision::Allow => {}
+            PolicyDecision::Deny => {
+                return ToolOutput::fail("策略拒绝：无权执行 Git 命令".into());
+            }
+            PolicyDecision::Prompt => {
+                return ToolOutput::fail("策略拦截：Git 命令需要人工确认".into());
+            }
         }
 
         // Viewer 只能执行只读命令

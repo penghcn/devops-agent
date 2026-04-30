@@ -29,6 +29,11 @@ impl PathValidator {
         }
     }
 
+    /// 返回 workspace 根路径
+    pub fn workspace_root(&self) -> &str {
+        &self.workspace_root
+    }
+
     /// 路径校验主入口
     pub fn validate(&self, path: &str) -> PathValidation {
         // 1. 解码 URL 编码
@@ -54,12 +59,20 @@ impl PathValidator {
             format!("{}/{}", self.workspace_root, path)
         };
 
-        if full_path.starts_with(&self.workspace_root) {
+        if is_within_workspace(&full_path, &self.workspace_root) {
             PathValidation::Ok
         } else {
             PathValidation::OutsideWorkspace
         }
     }
+}
+
+/// 检查路径是否在 workspace 内，防止前缀绕过（如 `/workspace_evil` 通过 `/workspace` 检查）
+fn is_within_workspace(path: &str, workspace: &str) -> bool {
+    if path == workspace {
+        return true;
+    }
+    path.starts_with(&format!("{}/", workspace))
 }
 
 /// 默认敏感文件模式列表
