@@ -166,12 +166,9 @@ impl StructuredOutput {
                     },
                     Message::User {
                         content: format!(
-                            "你的上一次输出不符合 JSON Schema。错误: {}。请重新输出符合以下 Schema 的 JSON:\n{}",
-                            last_error, self.schema
+                            "你的上一次输出不符合 JSON Schema。错误: {}。\n\n原始请求: {}\n\n请重新输出符合以下 Schema 的 JSON:\n{}",
+                            last_error, user_prompt, self.schema
                         ),
-                    },
-                    Message::User {
-                        content: user_prompt.to_string(),
                     },
                 ]
             };
