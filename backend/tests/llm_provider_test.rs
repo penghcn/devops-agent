@@ -277,3 +277,92 @@ async fn test_provider_trait_object() {
     let resp = provider.chat(&req).await.unwrap();
     assert!(!resp.content.is_empty());
 }
+
+// ── OpenAI Provider Tests ──
+
+/// Test: OpenAIConfig defaults
+#[test]
+fn test_openai_config_defaults() {
+    let config = OpenAIConfig::default();
+    assert_eq!(config.api_key, "");
+    assert_eq!(config.base_url, "https://api.openai.com/v1");
+    assert_eq!(config.default_model, "gpt-4o");
+    assert_eq!(config.timeout_secs, 60);
+}
+
+/// Test: OpenAIProvider::new() rejects empty api_key
+#[test]
+fn test_openai_missing_api_key() {
+    let config = OpenAIConfig::default();
+    let result = OpenAIProvider::new(config);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        LlmError::MissingApiKey { provider } => assert_eq!(provider, "openai"),
+        other => panic!("Expected MissingApiKey, got {:?}", other),
+    }
+}
+
+/// Test: OpenAIProvider::new() accepts valid api_key
+#[test]
+fn test_openai_valid_creation() {
+    let config = OpenAIConfig {
+        api_key: "sk-test".to_string(),
+        ..Default::default()
+    };
+    let provider = OpenAIProvider::new(config).unwrap();
+    assert_eq!(provider.provider_id(), "openai");
+}
+
+/// Test: OpenAIProvider with custom base_url
+#[test]
+fn test_openai_custom_base_url() {
+    let config = OpenAIConfig {
+        api_key: "sk-test".to_string(),
+        base_url: "https://custom.api.com/v1".to_string(),
+        ..Default::default()
+    };
+    let provider = OpenAIProvider::new(config).unwrap();
+    assert_eq!(provider.provider_id(), "openai");
+}
+
+/// Test: OpenAIProvider chat returns MissingApiKey error when key is empty
+#[tokio::test]
+async fn test_openai_chat_missing_key() {
+    let result = OpenAIProvider::new(OpenAIConfig::default());
+    assert!(result.is_err());
+}
+
+// ── Anthropic Provider Tests ──
+
+/// Test: AnthropicConfig defaults
+#[test]
+fn test_anthropic_config_defaults() {
+    let config = AnthropicConfig::default();
+    assert_eq!(config.api_key, "");
+    assert_eq!(config.base_url, "https://api.anthropic.com");
+    assert_eq!(config.default_model, "claude-sonnet-4-20250514");
+    assert_eq!(config.timeout_secs, 60);
+}
+
+/// Test: AnthropicProvider::new() rejects empty api_key
+#[test]
+fn test_anthropic_missing_api_key() {
+    let config = AnthropicConfig::default();
+    let result = AnthropicProvider::new(config);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        LlmError::MissingApiKey { provider } => assert_eq!(provider, "anthropic"),
+        other => panic!("Expected MissingApiKey, got {:?}", other),
+    }
+}
+
+/// Test: AnthropicProvider::new() accepts valid api_key
+#[test]
+fn test_anthropic_valid_creation() {
+    let config = AnthropicConfig {
+        api_key: "sk-ant-test".to_string(),
+        ..Default::default()
+    };
+    let provider = AnthropicProvider::new(config).unwrap();
+    assert_eq!(provider.provider_id(), "anthropic");
+}
