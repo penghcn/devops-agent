@@ -234,7 +234,7 @@ impl LlmProvider for AnthropicProvider {
             .client
             .post(&url)
             .header("x-api-key", &self.config.api_key)
-            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-version", "2023-10-01")
             .header("Content-Type", "application/json")
             .json(&body)
             .send()

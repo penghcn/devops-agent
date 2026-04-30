@@ -1,5 +1,5 @@
 use crate::agent::intent::{
-    extract_fields, intent_from_value, replace_branch, Intent, JobType,
+    extract_fields, intent_from_value, replace_intent_fields, Intent, JobType,
 };
 use crate::agent::chain_mapping::to_chain_with_prompt;
 use crate::agent::{AgentResponse, StepContext, TaskType};
@@ -279,11 +279,15 @@ impl IntentRouter {
                 "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
                 raw_job, job, branch
             );
-            return replace_branch(
+            return replace_intent_fields(
                 &intent,
                 job.to_string(),
                 Some(branch.to_string()),
-                &cached.job_type,
+                if cached.job_type == "pipeline_multibranch" {
+                    JobType::Branch
+                } else {
+                    JobType::Standard
+                },
             );
         }
 
@@ -297,7 +301,16 @@ impl IntentRouter {
                         "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split)",
                         raw_job, job, branch
                     );
-                    return replace_branch(&intent, job, Some(branch), &cached.job_type);
+                    return replace_intent_fields(
+                    &intent,
+                    job,
+                    Some(branch),
+                    if cached.job_type == "pipeline_multibranch" {
+                        JobType::Branch
+                    } else {
+                        JobType::Standard
+                    },
+                );
                 }
             }
         }

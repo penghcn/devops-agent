@@ -73,37 +73,32 @@ pub fn extract_fields(intent: &Intent) -> (Option<String>, Option<String>) {
 }
 
 /// Replace job_name/branch/job_type in an Intent
-pub fn replace_branch(
+pub fn replace_intent_fields(
     intent: &Intent,
     job_name: String,
     branch: Option<String>,
-    job_type: &str,
+    job_type: JobType,
 ) -> Intent {
-    let jt = if job_type == "pipeline_multibranch" || job_type == "branch" {
-        JobType::Branch
-    } else {
-        JobType::Standard
-    };
     match intent {
         Intent::DeployPipeline { .. } => Intent::DeployPipeline {
             job_name,
             branch,
-            job_type: jt,
+            job_type,
         },
         Intent::BuildPipeline { .. } => Intent::BuildPipeline {
             job_name,
             branch,
-            job_type: jt,
+            job_type,
         },
         Intent::QueryPipeline { .. } => Intent::QueryPipeline {
             job_name,
             branch,
-            job_type: jt,
+            job_type,
         },
         Intent::AnalyzeBuild { .. } => Intent::AnalyzeBuild {
             job_name,
             branch,
-            job_type: jt,
+            job_type,
         },
         Intent::General => Intent::General,
     }
