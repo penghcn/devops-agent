@@ -51,14 +51,24 @@ impl FileSystemIsolator {
 
     /// 检查是否允许写入：仅限 output 目录
     pub fn can_write(&self, path: &str) -> bool {
+        // 1. 路径穿越检测：拒绝任何包含 ".." 组件的路径
+        if path.split('/').any(|c| c == "..") {
+            return false;
+        }
+
+        // 2. 敏感文件检测
+        if self.validator.validate(path) != PathValidation::Ok {
+            return false;
+        }
+
         let abs = Path::new(path);
 
-        // 绝对路径：检查是否在 output 目录
+        // 3. 绝对路径：检查是否在 output 目录
         if abs.is_absolute() {
             return abs.starts_with(&self.config.output_dir);
         }
 
-        // 相对路径：检查解析后是否在 output 目录
+        // 4. 相对路径：检查解析后是否在 output 目录
         let resolved = self.config.output_dir.join(path);
         resolved.starts_with(&self.config.output_dir)
     }

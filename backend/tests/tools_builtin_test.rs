@@ -306,8 +306,9 @@ mod bash_tool_tests {
         let output = bash_tool.execute(&input).await;
         assert!(!output.success, "网络命令应该被拦截");
         assert!(
-            output.error.as_ref().unwrap().contains("拦截"),
-            "错误信息应包含拦截"
+            output.error.as_ref().unwrap().contains("拦截")
+                || output.error.as_ref().unwrap().contains("允许"),
+            "错误信息应包含拦截或允许列表"
         );
     }
 

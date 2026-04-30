@@ -59,6 +59,16 @@ fn cannot_write_workspace_root() {
 }
 
 #[test]
+fn cannot_write_traversal_path() {
+    let tmp = tempdir().unwrap();
+    let config = make_config(&tmp);
+    let isolator = FileSystemIsolator::new(config);
+    // 未规范化的路径应该被拒绝
+    assert!(!isolator.can_write("output/../../../etc/passwd"));
+    assert!(!isolator.can_write("../output/../result.txt"));
+}
+
+#[test]
 fn readonly_mount_allows_read() {
     let tmp = tempdir().unwrap();
     let ro = tmp.path().join("readonly");
