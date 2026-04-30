@@ -8,6 +8,7 @@ pub enum NetworkCheckResult {
 }
 
 /// 网络白名单，拦截网络命令
+#[derive(Clone)]
 pub struct NetworkWhitelist {
     blocked_commands: Vec<String>,
     pub allowed_hosts: Vec<String>,
@@ -31,7 +32,7 @@ impl NetworkWhitelist {
     pub fn check(&self, command: &str, _args: &[String]) -> NetworkCheckResult {
         let cmd_name = command
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or(command)
             .to_lowercase();
 
