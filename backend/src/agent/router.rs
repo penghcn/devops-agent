@@ -30,6 +30,38 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
     dp[m][n]
 }
 
+/// Find the best matching branch name in the cache.
+/// Returns (matched_branch, was_corrected) where was_corrected is true
+/// if the matched branch differs from the input.
+fn find_branch_match(
+    user_branch: &str,
+    cached_branches: &[String],
+) -> (String, bool) {
+    // Exact match
+    if let Some(found) = cached_branches.iter().find(|cb| cb == &user_branch) {
+        return (found.clone(), false);
+    }
+
+    // Prefix match
+    if let Some(found) = cached_branches.iter().find(|cb| cb.starts_with(user_branch)) {
+        return (found.clone(), true);
+    }
+
+    // Levenshtein distance match (threshold: 1)
+    if let Some(best) = cached_branches
+        .iter()
+        .min_by_key(|cb| levenshtein_distance(user_branch, cb))
+    {
+        let dist = levenshtein_distance(user_branch, best);
+        if dist <= 1 {
+            return (best.clone(), true);
+        }
+    }
+
+    // No match — return original
+    (user_branch.to_string(), false)
+}
+
 pub struct IntentRouter {
     cache: Arc<JenkinsCacheManager>,
     llm_provider: Option<Arc<dyn crate::llm::LlmProvider>>,
@@ -100,47 +132,16 @@ impl IntentRouter {
             let branch = branch.filter(|b| !b.is_empty());
             let mut correction: Option<(String, String)> = None;
 
-            if let Some(b) = &branch
-                && !cached.branches.contains(b)
-            {
-                let matched = cached
-                    .branches
-                    .iter()
-                    .find(|cb| cb.starts_with(b.as_str()))
-                    .or_else(|| {
-                        cached
-                            .branches
-                            .iter()
-                            .min_by_key(|cb| levenshtein_distance(b, cb))
-                            .filter(|cb| levenshtein_distance(b, cb) <= 1)
-                    });
-                if let Some(best) = matched
-                    && best != b.as_str()
-                {
-                    correction = Some((b.clone(), best.clone()));
+            let branch = if let Some(b) = &branch {
+                let (matched, was_corrected) =
+                    find_branch_match(b, &cached.branches);
+                if was_corrected {
+                    correction = Some((b.clone(), matched.clone()));
                 }
-            }
-
-            let branch = branch
-                .as_ref()
-                .and_then(|b| {
-                    if cached.branches.contains(b) {
-                        return Some(b.clone());
-                    }
-                    cached
-                        .branches
-                        .iter()
-                        .find(|cb| cb.starts_with(b.as_str()))
-                        .or_else(|| {
-                            cached
-                                .branches
-                                .iter()
-                                .min_by_key(|cb| levenshtein_distance(b, cb))
-                                .filter(|cb| levenshtein_distance(b, cb) <= 1)
-                        })
-                        .cloned()
-                })
-                .or(branch);
+                Some(matched)
+            } else {
+                branch
+            };
 
             tracing::info!(
                 "Intent regex match: action='{}', job='{}', branch={:?}, correction={:?} (from cache)",
