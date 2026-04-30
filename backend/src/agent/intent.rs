@@ -109,8 +109,20 @@ pub fn replace_branch(
     }
 }
 
+/// Error returned when intent JSON parsing fails
+#[derive(Debug)]
+pub struct ParseIntentError;
+
+impl std::fmt::Display for ParseIntentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "failed to parse intent JSON")
+    }
+}
+
+impl std::error::Error for ParseIntentError {}
+
 /// Parse LLM JSON response into Intent
-pub fn parse_intent_json(response: &str) -> Result<Intent, ()> {
+pub fn parse_intent_json(response: &str) -> Result<Intent, ParseIntentError> {
     #[derive(Deserialize)]
     struct IntentJson {
         action: String,
@@ -124,7 +136,7 @@ pub fn parse_intent_json(response: &str) -> Result<Intent, ()> {
         Err(_) => {
             let start = response.find('{').unwrap_or(0);
             let end = response.rfind('}').map(|i| i + 1).unwrap_or(response.len());
-            serde_json::from_str(&response[start..end]).map_err(|_| ())?
+            serde_json::from_str(&response[start..end]).map_err(|_| ParseIntentError)?
         }
     };
 
@@ -154,7 +166,7 @@ pub fn parse_intent_json(response: &str) -> Result<Intent, ()> {
             branch: parsed.branch,
             job_type,
         },
-        _ => return Err(()),
+        _ => return Err(ParseIntentError),
     };
 
     Ok(intent)

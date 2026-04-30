@@ -15,7 +15,7 @@ pub fn to_chain_with_prompt(intent: &Intent, prompt: &str) -> StepChain {
                 Box::new(JenkinsTriggerStep),
                 Box::new(JenkinsWaitStep::default()),
                 Box::new(JenkinsLogStep),
-                Box::new(ClaudeAnalyzeStep),
+                Box::new(ClaudeAnalyzeStep::default()),
             ])
         }
         Intent::QueryPipeline { .. } => {
@@ -24,11 +24,13 @@ pub fn to_chain_with_prompt(intent: &Intent, prompt: &str) -> StepChain {
         Intent::AnalyzeBuild { .. } => StepChain::new(vec![
             Box::new(JobValidateStep),
             Box::new(JenkinsLogStep),
-            Box::new(ClaudeAnalyzeStep),
+            Box::new(ClaudeAnalyzeStep::default()),
         ]),
         Intent::General => StepChain::new(vec![Box::new(ClaudeCodeStep {
             prompt: prompt.to_string(),
             allowed_tools: "Bash,Read,Write".to_string(),
+            llm_provider: None,
+            llm_model: None,
         })]),
     }
 }

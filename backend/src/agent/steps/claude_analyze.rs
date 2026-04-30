@@ -1,11 +1,21 @@
+use std::sync::Arc;
+
 use super::super::claude;
 use super::super::step::{Step, StepContext, StepResult};
+use crate::llm::{ChatRequest, LlmProvider, Message};
 
-pub struct ClaudeAnalyzeStep;
+#[derive(Default)]
+pub struct ClaudeAnalyzeStep {
+    llm_provider: Option<Arc<dyn LlmProvider>>,
+    llm_model: Option<String>,
+}
 
-impl Default for ClaudeAnalyzeStep {
-    fn default() -> Self {
-        Self
+impl ClaudeAnalyzeStep {
+    pub fn with_provider(provider: Arc<dyn LlmProvider>, model: Option<String>) -> Self {
+        Self {
+            llm_provider: Some(provider),
+            llm_model: model,
+        }
     }
 }
 
@@ -38,52 +48,72 @@ impl Step for ClaudeAnalyzeStep {
             build_failure_analysis_prompt(log, result)
         };
 
-        match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
-            Ok(raw_result) => {
-                // 尝试从 Claude 响应中提取 JSON 块
-                let json_str = extract_json(&raw_result);
-                match serde_json::from_str::<serde_json::Value>(json_str) {
-                    Ok(structured) => {
-                        ctx.structured_analysis = Some(structured.clone());
-                        // 同时生成一段人类可读的文本
-                        let human_text = format_structured_output(&structured);
-                        ctx.analysis_result = Some(human_text);
-                        StepResult::Success {
-                            message: "分析完成".to_string(),
-                        }
-                    }
-                    Err(_) => {
-                        // 回退：原始文本
-                        ctx.analysis_result = Some(raw_result);
-                        StepResult::Success {
-                            message: "分析完成".to_string(),
-                        }
+        let raw_result = if let Some(provider) = &self.llm_provider {
+            let model = self
+                .llm_model
+                .as_deref()
+                .unwrap_or("gpt-4o-mini")
+                .to_string();
+            match provider
+                .chat(&ChatRequest {
+                    model,
+                    messages: vec![Message::User {
+                        content: prompt.clone(),
+                    }],
+                    tools: None,
+                    temperature: Some(0.0),
+                })
+                .await
+            {
+                Ok(response) => response.content,
+                Err(e) => {
+                    tracing::warn!(error = %e, "LlmProvider failed, falling back to Claude Code CLI");
+                    match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
+                        Ok(r) => r,
+                        Err(e) => return StepResult::Failed { error: e.to_string() },
                     }
                 }
             }
-            Err(e) => StepResult::Failed {
-                error: e.to_string(),
-            },
+        } else {
+            match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
+                Ok(r) => r,
+                Err(e) => return StepResult::Failed { error: e.to_string() },
+            }
+        };
+
+        let json_str = extract_json(&raw_result);
+        match serde_json::from_str::<serde_json::Value>(json_str) {
+            Ok(structured) => {
+                ctx.structured_analysis = Some(structured.clone());
+                let human_text = format_structured_output(&structured);
+                ctx.analysis_result = Some(human_text);
+                StepResult::Success {
+                    message: "分析完成".to_string(),
+                }
+            }
+            Err(_) => {
+                ctx.analysis_result = Some(raw_result);
+                StepResult::Success {
+                    message: "分析完成".to_string(),
+                }
+            }
         }
     }
 }
 
 fn extract_json(text: &str) -> &str {
-    // 尝试从 ```json ... ``` 块中提取
     if let Some(start) = text.find("```json") {
         let after_marker = &text[start + 7..];
         if let Some(end) = after_marker.find("```") {
             return after_marker[..end].trim();
         }
     }
-    // 尝试从 ``` ... ``` 块中提取
     if let Some(start) = text.find("```") {
         let after_marker = &text[start + 3..];
         if let Some(end) = after_marker.find("```") {
             return after_marker[..end].trim();
         }
     }
-    // 尝试找最外层的 {} 块
     if let Some(start) = text.find('{')
         && let Some(end) = text.rfind('}')
     {
@@ -119,7 +149,6 @@ fn format_structured_output(data: &serde_json::Value) -> String {
             format!("部署失败: {}\n建议: {}", error, suggestion)
         }
         _ => {
-            // 构建分析结果
             let build_status = data
                 .get("build_status")
                 .and_then(|v| v.as_str())

@@ -4,7 +4,7 @@ pub mod intent;
 pub mod chain_mapping;
 pub mod steps;
 
-pub use intent::{Intent, JobType};
+pub use intent::{Intent, JobType, ParseIntentError};
 pub use router::IntentRouter;
 pub use step::{Step, StepChain, StepContext, StepResult};
 

@@ -57,13 +57,12 @@ impl IntentRouter {
     }
 
     pub async fn identify(&self, prompt: &str) -> (Intent, Option<(String, String)>) {
-        if let Some((action, job_name, branch)) = self.parse_simple(prompt) {
-            if let Some((intent, correction)) = self
+        if let Some((action, job_name, branch)) = self.parse_simple(prompt)
+            && let Some((intent, correction)) = self
                 .resolve_from_simple(&action, &job_name, branch.as_deref())
                 .await
-            {
-                return (intent, correction);
-            }
+        {
+            return (intent, correction);
         }
 
         match self.parse_with_llm(prompt).await {
@@ -228,9 +227,7 @@ impl IntentRouter {
     }
 
     async fn parse_with_llm(&self, prompt: &str) -> Option<Intent> {
-        let Some(provider) = self.llm_provider.as_ref() else {
-            return None;
-        };
+        let provider = self.llm_provider.as_ref()?;
 
         let intent_prompt = format!(
             "判断以下用户意图，只输出一个JSON，不要输出其他内容：\n{}\n\nJSON格式：{{\"action\":\"deploy|build|query|analyze\",\"job_name\":\"项目名称\",\"branch\":\"分支名或null\",\"job_type\":\"standard|branch\"}}",
