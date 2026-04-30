@@ -14,6 +14,7 @@ pub enum PathValidation {
 }
 
 /// 路径校验器，负责检测路径穿越、敏感文件访问和工作区边界
+#[derive(Clone)]
 pub struct PathValidator {
     workspace_root: String,
     sensitive_patterns: Vec<String>,
@@ -88,11 +89,11 @@ fn url_decode(input: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '%' {
             let hex: String = chars.by_ref().take(2).collect();
-            if hex.len() == 2 {
-                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                    result.push(byte as char);
-                    continue;
-                }
+            if hex.len() == 2
+                && let Ok(byte) = u8::from_str_radix(&hex, 16)
+            {
+                result.push(byte as char);
+                continue;
             }
             result.push('%');
             result.push_str(&hex);

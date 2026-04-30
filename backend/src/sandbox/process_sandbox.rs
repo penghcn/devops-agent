@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 /// 进程沙箱配置
+#[derive(Clone)]
 pub struct ProcessSandboxConfig {
     pub timeout_secs: u64,
     pub max_output_bytes: usize,
@@ -21,6 +22,7 @@ pub struct ProcessResult {
 }
 
 /// 进程沙箱，提供超时控制、环境变量净化、输出截断
+#[derive(Clone)]
 pub struct ProcessSandbox {
     config: ProcessSandboxConfig,
 }
@@ -51,19 +53,19 @@ impl ProcessSandbox {
         Self { config }
     }
 
-    /// 执行命令并返回结果
+    /// 执行命令并返回结果（同步，只能在非异步上下文中调用）
     pub fn execute(&self, command: &str, args: &[String]) -> anyhow::Result<ProcessResult> {
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(self.execute_async(command, args))
     }
 
-    async fn execute_async(
+    /// 执行命令并返回结果（异步版本，可在异步上下文中调用）
+    pub async fn execute_async(
         &self,
         command: &str,
         args: &[String],
     ) -> anyhow::Result<ProcessResult> {
-        let allowed_keys: HashSet<String> =
-            self.config.allowed_env_keys.iter().cloned().collect();
+        let allowed_keys: HashSet<String> = self.config.allowed_env_keys.iter().cloned().collect();
         let clean_env: HashMap<String, String> = std::env::vars()
             .filter(|(k, _)| allowed_keys.contains(k))
             .collect();
@@ -87,8 +89,7 @@ impl ProcessSandbox {
         match result {
             Ok(Ok(output)) => {
                 let max = self.config.max_output_bytes;
-                let truncated =
-                    output.stdout.len() > max || output.stderr.len() > max;
+                let truncated = output.stdout.len() > max || output.stderr.len() > max;
 
                 let stdout = build_output(&output.stdout, max);
                 let stderr = build_output(&output.stderr, max);

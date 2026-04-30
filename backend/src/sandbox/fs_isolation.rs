@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use super::path_check::{PathValidation, PathValidator};
 
 /// 文件系统隔离配置
+#[derive(Clone)]
 pub struct FsIsolationConfig {
     pub workspace_root: PathBuf,
     pub tmp_dir: PathBuf,
@@ -12,6 +13,7 @@ pub struct FsIsolationConfig {
 }
 
 /// 文件系统隔离器，限制文件操作在安全边界内
+#[derive(Clone)]
 pub struct FileSystemIsolator {
     config: FsIsolationConfig,
     validator: PathValidator,
@@ -20,9 +22,7 @@ pub struct FileSystemIsolator {
 impl FileSystemIsolator {
     pub fn new(config: FsIsolationConfig) -> Self {
         Self {
-            validator: PathValidator::new(
-                config.workspace_root.to_str().unwrap_or("/workspace"),
-            ),
+            validator: PathValidator::new(config.workspace_root.to_str().unwrap_or("/workspace")),
             config,
         }
     }
@@ -33,7 +33,12 @@ impl FileSystemIsolator {
 
         // 绝对路径：直接检查是否在只读挂载目录中
         if abs.is_absolute() {
-            if self.config.read_only_mounts.iter().any(|m| abs.starts_with(m)) {
+            if self
+                .config
+                .read_only_mounts
+                .iter()
+                .any(|m| abs.starts_with(m))
+            {
                 return true;
             }
             // 绝对路径不在只读挂载中，走正常校验
