@@ -11,9 +11,12 @@ pub struct ClaudeAnalyzeStep {
 }
 
 impl ClaudeAnalyzeStep {
-    pub fn with_provider(provider: Arc<dyn LlmProvider>, model: Option<String>) -> Self {
+    pub fn with_provider(
+        provider: Option<Arc<dyn LlmProvider>>,
+        model: Option<String>,
+    ) -> Self {
         Self {
-            llm_provider: Some(provider),
+            llm_provider: provider,
             llm_model: model,
         }
     }

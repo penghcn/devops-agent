@@ -3,7 +3,8 @@ use crate::agent::intent::{
 };
 use crate::agent::chain_mapping::to_chain_with_prompt;
 use crate::agent::{AgentResponse, StepContext, TaskType};
-use crate::llm::StructuredOutput;
+use crate::config::Config;
+use crate::llm::{LlmProvider, StructuredOutput};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
@@ -307,24 +308,38 @@ impl IntentRouter {
         intent
     }
 
-    pub async fn execute(&self, prompt: &str, task_type: TaskType) -> AgentResponse {
+    pub async fn execute(
+        &self,
+        prompt: &str,
+        task_type: TaskType,
+        config: Arc<Config>,
+        llm_provider: Option<Arc<dyn LlmProvider>>,
+        llm_model: Option<String>,
+    ) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, branch_correction) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
-        let chain = to_chain_with_prompt(&intent, prompt);
+        let chain = to_chain_with_prompt(&intent, prompt, llm_provider.clone(), llm_model.clone());
 
         let (job_name, branch) = extract_fields(&intent);
 
-        let ctx = StepContext::new(
+        let mut ctx = StepContext::new(
             prompt.to_string(),
             task_type,
             job_name,
             branch,
-            Arc::new(crate::config::Config::from_env()),
+            config,
         )
         .with_cache(self.cache.clone())
         .with_identify_elapsed(identify_elapsed);
+
+        if let Some(provider) = llm_provider {
+            ctx = ctx.with_llm_provider(provider);
+        }
+        if let Some(model) = llm_model {
+            ctx = ctx.with_llm_model(model);
+        }
         let ctx = if let Some((orig, corrected)) = &branch_correction {
             ctx.with_branch_correction(format!("原始分支 '{}' 已修正为 '{}'", orig, corrected))
         } else {

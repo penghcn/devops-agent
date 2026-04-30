@@ -11,6 +11,7 @@ pub use step::{Step, StepChain, StepContext, StepResult};
 pub mod claude;
 
 use crate::config::Config;
+use crate::llm::{LlmProvider, OpenAIConfig, OpenAIProvider};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -59,9 +60,54 @@ pub struct AgentStep {
 /// 主 Agent 入口 — 基于步骤链架构
 pub async fn process_request(
     req: AgentRequest,
-    _config: &Config,
+    config: &Config,
     cache: Arc<JenkinsCacheManager>,
 ) -> AgentResponse {
-    let intent_router = IntentRouter::new(cache);
-    intent_router.execute(&req.prompt, req.task_type).await
+    let llm_provider: Option<Arc<dyn LlmProvider>> = build_llm_provider(config);
+    let llm_model = llm_provider.as_ref().map(|_| "gpt-4o-mini".to_string());
+
+    let intent_router = if let Some(ref provider) = llm_provider {
+        IntentRouter::with_llm(
+            cache.clone(),
+            provider.clone(),
+            llm_model.as_deref().unwrap_or("gpt-4o-mini"),
+        )
+    } else {
+        IntentRouter::new(cache)
+    };
+
+    intent_router
+        .execute(
+            &req.prompt,
+            req.task_type,
+            Arc::new(config.clone()),
+            llm_provider,
+            llm_model,
+        )
+        .await
+}
+
+/// Build an LLM provider from config if API keys are available.
+fn build_llm_provider(_config: &Config) -> Option<Arc<dyn LlmProvider>> {
+    let openai_key = std::env::var("OPENAI_API_KEY").ok();
+    if let Some(key) = openai_key
+        && !key.is_empty()
+    {
+        let cfg = OpenAIConfig {
+            api_key: key,
+            base_url: std::env::var("OPENAI_BASE_URL")
+                .ok()
+                .unwrap_or_else(|| "https://api.openai.com".to_string()),
+            default_model: "gpt-4o-mini".to_string(),
+            timeout_secs: 60,
+        };
+        match OpenAIProvider::new(cfg) {
+            Ok(provider) => return Some(Arc::new(provider)),
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to create OpenAI provider");
+            }
+        }
+    }
+
+    None
 }
