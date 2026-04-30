@@ -1,5 +1,5 @@
 use crate::agent::intent::{
-    extract_fields, parse_intent_json, replace_branch, Intent, JobType,
+    extract_fields, intent_from_value, replace_branch, Intent, JobType,
 };
 use crate::agent::chain_mapping::to_chain_with_prompt;
 use crate::agent::{AgentResponse, StepContext, TaskType};
@@ -251,7 +251,7 @@ impl IntentRouter {
         );
 
         match so.execute::<serde_json::Value>(&intent_prompt).await {
-            Ok(json) => parse_intent_json(&json.to_string()).ok(),
+            Ok(json) => intent_from_value(json).ok(),
             Err(_) => None,
         }
     }
