@@ -9,9 +9,13 @@ use serde::{Deserialize, Serialize};
 
 pub mod anthropic_provider;
 pub mod openai_provider;
+pub mod router;
+pub mod structured_output;
 
 pub use anthropic_provider::{AnthropicConfig, AnthropicProvider};
 pub use openai_provider::{OpenAIConfig, OpenAIProvider};
+pub use router::{ModelRouter, ModelRouterConfig, TaskLevel};
+pub use structured_output::{StructuredOutput, StructuredOutputError};
 
 // ── Provider Trait ──
 
