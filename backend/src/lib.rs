@@ -4,4 +4,5 @@ pub mod harness;
 pub mod memory;
 pub mod security;
 pub mod token;
+pub mod sandbox;
 pub mod tools;
