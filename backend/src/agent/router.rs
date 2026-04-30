@@ -1,12 +1,10 @@
-use crate::agent::step::StepChain;
-use crate::agent::steps::{
-    claude_analyze::ClaudeAnalyzeStep, claude_code::ClaudeCodeStep, jenkins_log::JenkinsLogStep,
-    jenkins_status::JenkinsStatusStep, jenkins_trigger::JenkinsTriggerStep,
-    jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep,
+use crate::agent::intent::{
+    extract_fields, parse_intent_json, replace_branch, Intent, JobType,
 };
-use crate::agent::{AgentResponse, StepContext, TaskType, claude};
+use crate::agent::chain_mapping::to_chain_with_prompt;
+use crate::agent::{AgentResponse, StepContext, TaskType};
+use crate::llm::StructuredOutput;
 use crate::tools::jenkins_cache::JenkinsCacheManager;
-use serde::Deserialize;
 use std::sync::Arc;
 
 fn levenshtein_distance(a: &str, b: &str) -> usize {
@@ -31,77 +29,35 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
     dp[m][n]
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum JobType {
-    Standard, // 普通 Job
-    #[default]
-    Branch, // 多分支 Pipeline
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Intent {
-    DeployPipeline {
-        job_name: String,
-        branch: Option<String>,
-        job_type: JobType,
-    },
-    BuildPipeline {
-        job_name: String,
-        branch: Option<String>,
-        job_type: JobType,
-    },
-    QueryPipeline {
-        job_name: String,
-        branch: Option<String>,
-        job_type: JobType,
-    },
-    AnalyzeBuild {
-        job_name: String,
-        branch: Option<String>,
-        job_type: JobType,
-    },
-    General,
-}
-
-impl Intent {
-    fn branch_is_some(&self) -> bool {
-        matches!(
-            self,
-            Intent::DeployPipeline {
-                branch: Some(_),
-                ..
-            } | Intent::BuildPipeline {
-                branch: Some(_),
-                ..
-            } | Intent::QueryPipeline {
-                branch: Some(_),
-                ..
-            } | Intent::AnalyzeBuild {
-                branch: Some(_),
-                ..
-            }
-        )
-    }
-}
-
 pub struct IntentRouter {
     cache: Arc<JenkinsCacheManager>,
+    llm_provider: Option<Arc<dyn crate::llm::LlmProvider>>,
+    llm_model: String,
 }
 
 impl IntentRouter {
     pub fn new(cache: Arc<JenkinsCacheManager>) -> Self {
-        Self { cache }
+        Self {
+            cache,
+            llm_provider: None,
+            llm_model: "gpt-4o-mini".to_string(),
+        }
     }
 
-    /// 识别用户意图（分层策略）：
-    /// 1. 正则快速匹配：`部署/构建/查询/分析 {job_name}/{branch}` — 不调用 Claude
-    /// 2. 自然语言模糊意图 → 调用 Claude
-    /// 3. 无法识别 → General
-    ///    返回 (Intent, 分支修正提示)
+    pub fn with_llm(
+        cache: Arc<JenkinsCacheManager>,
+        llm_provider: Arc<dyn crate::llm::LlmProvider>,
+        llm_model: impl Into<String>,
+    ) -> Self {
+        Self {
+            cache,
+            llm_provider: Some(llm_provider),
+            llm_model: llm_model.into(),
+        }
+    }
+
     pub async fn identify(&self, prompt: &str) -> (Intent, Option<(String, String)>) {
-        // 第一层：正则快速匹配（不花 token）
         if let Some((action, job_name, branch)) = self.parse_simple(prompt) {
-            // 用缓存匹配确认 job_name 是否存在，并拆分组合名称
             if let Some((intent, correction)) = self
                 .resolve_from_simple(&action, &job_name, branch.as_deref())
                 .await
@@ -110,15 +66,12 @@ impl IntentRouter {
             }
         }
 
-        // 第二层：Claude 识别自然语言意图
-        match self.parse_with_claude(prompt).await {
+        match self.parse_with_llm(prompt).await {
             Some(intent) => (self.match_cache(intent).await, None),
             None => (Intent::General, None),
         }
     }
 
-    /// 从正则解析结果中解析 Intent，需要异步获取缓存
-    /// 返回 (Intent, 分支修正提示)，如 Some(("de5", "dev")) 表示 de5 被修正为 dev
     async fn resolve_from_simple(
         &self,
         action: &str,
@@ -127,7 +80,6 @@ impl IntentRouter {
     ) -> Option<(Intent, Option<(String, String)>)> {
         let cache_data = self.cache.get_cached().await?;
 
-        // 尝试拆分：斜杠分隔（raw_job 中已含 /）
         let (job_name, branch) = if let Some((j, b)) = raw_job.split_once('/') {
             (j.to_string(), Some(b.to_string()))
         } else if let Some(b) = branch_hint {
@@ -136,7 +88,6 @@ impl IntentRouter {
             (raw_job.to_string(), None)
         };
 
-        // 在缓存中查找 job
         let cached = cache_data.jobs.iter().find(|j| j.name == job_name)?;
 
         let jt = if cached.job_type == "pipeline_multibranch" {
@@ -145,7 +96,6 @@ impl IntentRouter {
             JobType::Standard
         };
 
-        // 多分支 Pipeline 校验 branch
         if cached.job_type == "pipeline_multibranch" {
             let branch = branch.filter(|b| !b.is_empty());
             let mut correction: Option<(String, String)> = None;
@@ -153,7 +103,6 @@ impl IntentRouter {
             if let Some(b) = &branch
                 && !cached.branches.contains(b)
             {
-                // starts_with 优先
                 let matched = cached
                     .branches
                     .iter()
@@ -195,83 +144,21 @@ impl IntentRouter {
 
             tracing::info!(
                 "Intent regex match: action='{}', job='{}', branch={:?}, correction={:?} (from cache)",
-                action,
-                job_name,
-                branch,
-                correction
+                action, job_name, branch, correction
             );
-            return Some((
-                match action {
-                    "deploy" => Intent::DeployPipeline {
-                        job_name,
-                        branch,
-                        job_type: jt,
-                    },
-                    "build" => Intent::BuildPipeline {
-                        job_name,
-                        branch,
-                        job_type: jt,
-                    },
-                    "query" => Intent::QueryPipeline {
-                        job_name,
-                        branch,
-                        job_type: jt,
-                    },
-                    "analyze" => Intent::AnalyzeBuild {
-                        job_name,
-                        branch,
-                        job_type: jt,
-                    },
-                    _ => return None,
-                },
-                correction,
-            ));
+            return Some((build_intent(action, &job_name, branch, jt), correction));
         }
 
-        // 非多分支，无分支要求
         let branch = branch.filter(|b| !b.is_empty());
         tracing::info!(
             "Intent regex match: action='{}', job='{}', branch={:?} (from cache)",
-            action,
-            job_name,
-            branch
+            action, job_name, branch
         );
 
-        Some((
-            match action {
-                "deploy" => Intent::DeployPipeline {
-                    job_name,
-                    branch,
-                    job_type: jt,
-                },
-                "build" => Intent::BuildPipeline {
-                    job_name,
-                    branch,
-                    job_type: jt,
-                },
-                "query" => Intent::QueryPipeline {
-                    job_name,
-                    branch,
-                    job_type: jt,
-                },
-                "analyze" => Intent::AnalyzeBuild {
-                    job_name,
-                    branch,
-                    job_type: jt,
-                },
-                _ => return None,
-            },
-            None,
-        ))
+        Some((build_intent(action, &job_name, branch, jt), None))
     }
 
-    /// 第一层：正则快速解析（不花 token）
-    /// 匹配模式：
-    ///   - "部署 ds-pkg/dev 到 staging" → job=ds-pkg, branch=dev
-    ///   - "构建 ds-pkg dev" → job=ds-pkg, branch=dev
-    ///   - "查询 ds-pkg" → job=ds-pkg, branch=null
     pub fn parse_simple(&self, prompt: &str) -> Option<(String, String, Option<String>)> {
-        // 动作关键词（注意顺序：query/analyze 在 build 之前，避免"查询构建状态"被误判为 build）
         let action = if prompt.contains("部署") || prompt.contains("发布") {
             "deploy"
         } else if prompt.contains("分析")
@@ -279,8 +166,7 @@ impl IntentRouter {
             || prompt.contains("看日志")
         {
             "analyze"
-        } else if prompt.contains("查询") || prompt.contains("查看") || prompt.contains("状态")
-        {
+        } else if prompt.contains("查询") || prompt.contains("查看") || prompt.contains("状态") {
             "query"
         } else if prompt.contains("构建") || prompt.contains("编译") {
             "build"
@@ -288,7 +174,6 @@ impl IntentRouter {
             return None;
         };
 
-        // 去掉动作词和环境词，剩余部分解析 job_name/branch
         let cleaned = prompt
             .replace("部署", "")
             .replace("发布", "")
@@ -315,7 +200,6 @@ impl IntentRouter {
             .trim()
             .to_string();
 
-        // 尝试 "job/branch" 格式
         if let Some((job, branch)) = cleaned.split_once('/') {
             let job = job.trim().to_string();
             let branch = branch.trim().to_string();
@@ -324,7 +208,6 @@ impl IntentRouter {
             }
         }
 
-        // 尝试 "job branch" 格式
         let parts: Vec<&str> = cleaned.split_whitespace().collect();
         if parts.len() >= 2 {
             for i in 0..parts.len() - 1 {
@@ -336,7 +219,6 @@ impl IntentRouter {
             }
         }
 
-        // 单个 job name（无分支）
         let job = cleaned.trim().to_string();
         if !job.is_empty() {
             return Some((action.to_string(), job, None));
@@ -345,30 +227,43 @@ impl IntentRouter {
         None
     }
 
-    /// 第二层：调用 Claude 识别自然语言意图
-    async fn parse_with_claude(&self, prompt: &str) -> Option<Intent> {
+    async fn parse_with_llm(&self, prompt: &str) -> Option<Intent> {
+        let Some(provider) = self.llm_provider.as_ref() else {
+            return None;
+        };
+
         let intent_prompt = format!(
-            "判断以下用户意图，只输出一个 JSON，不要输出其他内容：\n{}\n\nJSON 格式：{{\"action\":\"deploy|build|query|analyze\",\"job_name\":\"项目名称\",\"branch\":\"分支名或null\",\"job_type\":\"standard|branch\"}}",
+            "判断以下用户意图，只输出一个JSON，不要输出其他内容：\n{}\n\nJSON格式：{{\"action\":\"deploy|build|query|analyze\",\"job_name\":\"项目名称\",\"branch\":\"分支名或null\",\"job_type\":\"standard|branch\"}}",
             prompt
         );
 
-        match claude::call_claude_code(&intent_prompt, "").await {
-            Ok(response) => parse_intent_json(&response).ok(),
+        let so = StructuredOutput::new(
+            provider.clone(),
+            self.llm_model.clone(),
+            serde_json::json!({
+                "type": "object",
+                "required": ["action", "job_name"],
+                "properties": {
+                    "action": {"type": "string", "enum": ["deploy", "build", "query", "analyze"]},
+                    "job_name": {"type": "string"},
+                    "branch": {"type": "string", "nullable": true},
+                    "job_type": {"type": "string", "enum": ["standard", "branch"]}
+                }
+            })
+        );
+
+        match so.execute::<serde_json::Value>(&intent_prompt).await {
+            Ok(json) => parse_intent_json(&json.to_string()).ok(),
             Err(_) => None,
         }
     }
 
-    /// 用缓存匹配拆分组合名称（async，需要获取缓存）
-    /// 支持格式：
-    ///   - "ds-pkg/dev" → job=ds-pkg, branch=dev
-    ///   - "ds-pkg dev" → job=ds-pkg, branch=dev
     async fn match_cache(&self, intent: Intent) -> Intent {
-        // 如果 Claude 已经正确拆分了 branch，直接返回
         if intent.branch_is_some() {
             return intent;
         }
 
-        let (raw_job, _) = Self::extract_fields(&intent);
+        let (raw_job, _) = extract_fields(&intent);
         let Some(raw_job) = raw_job else {
             return intent;
         };
@@ -378,17 +273,14 @@ impl IntentRouter {
             None => return intent,
         };
 
-        // 尝试拆分：斜杠分隔
         if let Some((job, branch)) = raw_job.split_once('/')
             && let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job)
         {
             tracing::info!(
                 "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
-                raw_job,
-                job,
-                branch
+                raw_job, job, branch
             );
-            return self.replace_branch(
+            return replace_branch(
                 &intent,
                 job.to_string(),
                 Some(branch.to_string()),
@@ -396,7 +288,6 @@ impl IntentRouter {
             );
         }
 
-        // 尝试拆分：空格分隔
         let parts: Vec<&str> = raw_job.split_whitespace().collect();
         if parts.len() >= 2 {
             for i in 0..parts.len() - 1 {
@@ -405,16 +296,13 @@ impl IntentRouter {
                 if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
                     tracing::info!(
                         "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split)",
-                        raw_job,
-                        job,
-                        branch
+                        raw_job, job, branch
                     );
-                    return self.replace_branch(&intent, job, Some(branch), &cached.job_type);
+                    return replace_branch(&intent, job, Some(branch), &cached.job_type);
                 }
             }
         }
 
-        // 精确匹配：raw_job 本身就是 job name
         if cache_data.jobs.iter().any(|j| j.name == raw_job) {
             return intent;
         }
@@ -422,96 +310,14 @@ impl IntentRouter {
         intent
     }
 
-    fn replace_branch(
-        &self,
-        intent: &Intent,
-        job_name: String,
-        branch: Option<String>,
-        job_type: &str,
-    ) -> Intent {
-        let jt = if job_type == "pipeline_multibranch" || job_type == "branch" {
-            JobType::Branch
-        } else {
-            JobType::Standard
-        };
-        match intent {
-            Intent::DeployPipeline { .. } => Intent::DeployPipeline {
-                job_name,
-                branch,
-                job_type: jt,
-            },
-            Intent::BuildPipeline { .. } => Intent::BuildPipeline {
-                job_name,
-                branch,
-                job_type: jt,
-            },
-            Intent::QueryPipeline { .. } => Intent::QueryPipeline {
-                job_name,
-                branch,
-                job_type: jt,
-            },
-            Intent::AnalyzeBuild { .. } => Intent::AnalyzeBuild {
-                job_name,
-                branch,
-                job_type: jt,
-            },
-            Intent::General => Intent::General,
-        }
-    }
-
-    /// 根据 Intent 返回对应的 StepChain
-    pub fn to_chain_with_prompt(&self, intent: &Intent, prompt: &str) -> StepChain {
-        match intent {
-            Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
-                Box::new(JobValidateStep),
-                Box::new(JenkinsTriggerStep),
-                Box::new(JenkinsWaitStep::default()),
-                Box::new(JenkinsLogStep),
-                Box::new(ClaudeAnalyzeStep),
-            ]),
-            Intent::QueryPipeline { .. } => {
-                StepChain::new(vec![Box::new(JobValidateStep), Box::new(JenkinsStatusStep)])
-            }
-            Intent::AnalyzeBuild { .. } => StepChain::new(vec![
-                Box::new(JobValidateStep),
-                Box::new(JenkinsLogStep),
-                Box::new(ClaudeAnalyzeStep),
-            ]),
-            Intent::General => StepChain::new(vec![Box::new(ClaudeCodeStep {
-                prompt: prompt.to_string(),
-                allowed_tools: "Bash,Read,Write".to_string(),
-            })]),
-        }
-    }
-
-    /// 从 Intent 中提取 job_name 和 branch
-    fn extract_fields(intent: &Intent) -> (Option<String>, Option<String>) {
-        match intent {
-            Intent::DeployPipeline {
-                job_name, branch, ..
-            }
-            | Intent::BuildPipeline {
-                job_name, branch, ..
-            }
-            | Intent::QueryPipeline {
-                job_name, branch, ..
-            }
-            | Intent::AnalyzeBuild {
-                job_name, branch, ..
-            } => (Some(job_name.clone()), branch.clone()),
-            Intent::General => (None, None),
-        }
-    }
-
-    /// 完整流程：识别意图 + 执行 StepChain
     pub async fn execute(&self, prompt: &str, task_type: TaskType) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, branch_correction) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
-        let chain = self.to_chain_with_prompt(&intent, prompt);
+        let chain = to_chain_with_prompt(&intent, prompt);
 
-        let (job_name, branch) = Self::extract_fields(&intent);
+        let (job_name, branch) = extract_fields(&intent);
 
         let ctx = StepContext::new(
             prompt.to_string(),
@@ -535,7 +341,6 @@ impl IntentRouter {
             .iter()
             .any(|s| s.result.contains("成功") || s.result.contains("完成"));
 
-        // 优先返回第一条失败/中止信息，否则返回分析结果或最后一步
         let output = final_ctx
             .steps
             .iter()
@@ -560,54 +365,33 @@ impl IntentRouter {
     }
 }
 
-/// 解析 Claude 返回的 JSON，构建 Intent
-fn parse_intent_json(response: &str) -> Result<Intent, ()> {
-    #[derive(Deserialize)]
-    struct IntentJson {
-        action: String,
-        job_name: String,
-        branch: Option<String>,
-        job_type: String,
-    }
-
-    let parsed: IntentJson = match serde_json::from_str::<IntentJson>(response) {
-        Ok(v) => v,
-        Err(_) => {
-            // 尝试从 response 中找 JSON 片段
-            let start = response.find('{').unwrap_or(0);
-            let end = response.rfind('}').map(|i| i + 1).unwrap_or(response.len());
-            serde_json::from_str(&response[start..end]).map_err(|_| ())?
-        }
-    };
-
-    let job_type = match parsed.job_type.as_str() {
-        "branch" => JobType::Branch,
-        _ => JobType::Standard,
-    };
-
-    let intent = match parsed.action.as_str() {
+fn build_intent(
+    action: &str,
+    job_name: &str,
+    branch: Option<String>,
+    job_type: JobType,
+) -> Intent {
+    match action {
         "deploy" => Intent::DeployPipeline {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
+            job_name: job_name.to_string(),
+            branch,
             job_type,
         },
         "build" => Intent::BuildPipeline {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
+            job_name: job_name.to_string(),
+            branch,
             job_type,
         },
         "query" => Intent::QueryPipeline {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
+            job_name: job_name.to_string(),
+            branch,
             job_type,
         },
         "analyze" => Intent::AnalyzeBuild {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
+            job_name: job_name.to_string(),
+            branch,
             job_type,
         },
-        _ => return Err(()),
-    };
-
-    Ok(intent)
+        _ => Intent::General,
+    }
 }

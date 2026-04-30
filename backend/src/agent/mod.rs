@@ -1,8 +1,11 @@
 mod router;
 mod step;
+pub mod intent;
+pub mod chain_mapping;
 pub mod steps;
 
-pub use router::{Intent, IntentRouter};
+pub use intent::{Intent, JobType};
+pub use router::IntentRouter;
 pub use step::{Step, StepChain, StepContext, StepResult};
 
 pub mod claude;
