@@ -1,9 +1,10 @@
 use crate::agent::intent::{
-    extract_fields, parse_intent_json, replace_branch, Intent, JobType,
+    extract_fields, intent_from_value, replace_intent_fields, Intent, JobType,
 };
 use crate::agent::chain_mapping::to_chain_with_prompt;
 use crate::agent::{AgentResponse, StepContext, TaskType};
-use crate::llm::StructuredOutput;
+use crate::config::Config;
+use crate::llm::{LlmProvider, StructuredOutput};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
@@ -27,6 +28,38 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
         }
     }
     dp[m][n]
+}
+
+/// Find the best matching branch name in the cache.
+/// Returns (matched_branch, was_corrected) where was_corrected is true
+/// if the matched branch differs from the input.
+fn find_branch_match(
+    user_branch: &str,
+    cached_branches: &[String],
+) -> (String, bool) {
+    // Exact match
+    if let Some(found) = cached_branches.iter().find(|cb| cb == &user_branch) {
+        return (found.clone(), false);
+    }
+
+    // Prefix match
+    if let Some(found) = cached_branches.iter().find(|cb| cb.starts_with(user_branch)) {
+        return (found.clone(), true);
+    }
+
+    // Levenshtein distance match (threshold: 1)
+    if let Some(best) = cached_branches
+        .iter()
+        .min_by_key(|cb| levenshtein_distance(user_branch, cb))
+    {
+        let dist = levenshtein_distance(user_branch, best);
+        if dist <= 1 {
+            return (best.clone(), true);
+        }
+    }
+
+    // No match — return original
+    (user_branch.to_string(), false)
 }
 
 pub struct IntentRouter {
@@ -99,47 +132,16 @@ impl IntentRouter {
             let branch = branch.filter(|b| !b.is_empty());
             let mut correction: Option<(String, String)> = None;
 
-            if let Some(b) = &branch
-                && !cached.branches.contains(b)
-            {
-                let matched = cached
-                    .branches
-                    .iter()
-                    .find(|cb| cb.starts_with(b.as_str()))
-                    .or_else(|| {
-                        cached
-                            .branches
-                            .iter()
-                            .min_by_key(|cb| levenshtein_distance(b, cb))
-                            .filter(|cb| levenshtein_distance(b, cb) <= 1)
-                    });
-                if let Some(best) = matched
-                    && best != b.as_str()
-                {
-                    correction = Some((b.clone(), best.clone()));
+            let branch = if let Some(b) = &branch {
+                let (matched, was_corrected) =
+                    find_branch_match(b, &cached.branches);
+                if was_corrected {
+                    correction = Some((b.clone(), matched.clone()));
                 }
-            }
-
-            let branch = branch
-                .as_ref()
-                .and_then(|b| {
-                    if cached.branches.contains(b) {
-                        return Some(b.clone());
-                    }
-                    cached
-                        .branches
-                        .iter()
-                        .find(|cb| cb.starts_with(b.as_str()))
-                        .or_else(|| {
-                            cached
-                                .branches
-                                .iter()
-                                .min_by_key(|cb| levenshtein_distance(b, cb))
-                                .filter(|cb| levenshtein_distance(b, cb) <= 1)
-                        })
-                        .cloned()
-                })
-                .or(branch);
+                Some(matched)
+            } else {
+                branch
+            };
 
             tracing::info!(
                 "Intent regex match: action='{}', job='{}', branch={:?}, correction={:?} (from cache)",
@@ -250,7 +252,7 @@ impl IntentRouter {
         );
 
         match so.execute::<serde_json::Value>(&intent_prompt).await {
-            Ok(json) => parse_intent_json(&json.to_string()).ok(),
+            Ok(json) => intent_from_value(json).ok(),
             Err(_) => None,
         }
     }
@@ -277,11 +279,15 @@ impl IntentRouter {
                 "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
                 raw_job, job, branch
             );
-            return replace_branch(
+            return replace_intent_fields(
                 &intent,
                 job.to_string(),
                 Some(branch.to_string()),
-                &cached.job_type,
+                if cached.job_type == "pipeline_multibranch" {
+                    JobType::Branch
+                } else {
+                    JobType::Standard
+                },
             );
         }
 
@@ -295,7 +301,16 @@ impl IntentRouter {
                         "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split)",
                         raw_job, job, branch
                     );
-                    return replace_branch(&intent, job, Some(branch), &cached.job_type);
+                    return replace_intent_fields(
+                    &intent,
+                    job,
+                    Some(branch),
+                    if cached.job_type == "pipeline_multibranch" {
+                        JobType::Branch
+                    } else {
+                        JobType::Standard
+                    },
+                );
                 }
             }
         }
@@ -307,24 +322,38 @@ impl IntentRouter {
         intent
     }
 
-    pub async fn execute(&self, prompt: &str, task_type: TaskType) -> AgentResponse {
+    pub async fn execute(
+        &self,
+        prompt: &str,
+        task_type: TaskType,
+        config: Arc<Config>,
+        llm_provider: Option<Arc<dyn LlmProvider>>,
+        llm_model: Option<String>,
+    ) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, branch_correction) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
-        let chain = to_chain_with_prompt(&intent, prompt);
+        let chain = to_chain_with_prompt(&intent, prompt, llm_provider.clone(), llm_model.clone());
 
         let (job_name, branch) = extract_fields(&intent);
 
-        let ctx = StepContext::new(
+        let mut ctx = StepContext::new(
             prompt.to_string(),
             task_type,
             job_name,
             branch,
-            Arc::new(crate::config::Config::from_env()),
+            config,
         )
         .with_cache(self.cache.clone())
         .with_identify_elapsed(identify_elapsed);
+
+        if let Some(provider) = llm_provider {
+            ctx = ctx.with_llm_provider(provider);
+        }
+        if let Some(model) = llm_model {
+            ctx = ctx.with_llm_model(model);
+        }
         let ctx = if let Some((orig, corrected)) = &branch_correction {
             ctx.with_branch_correction(format!("原始分支 '{}' 已修正为 '{}'", orig, corrected))
         } else {
@@ -335,8 +364,12 @@ impl IntentRouter {
 
         let success = final_ctx
             .steps
-            .iter()
-            .any(|s| s.result.contains("成功") || s.result.contains("完成"));
+            .last()
+            .is_some_and(|s| {
+                s.result.contains("成功")
+                    && !s.result.contains("失败")
+                    && !s.result.contains("中止")
+            });
 
         let output = final_ctx
             .steps
