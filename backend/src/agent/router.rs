@@ -350,8 +350,12 @@ impl IntentRouter {
 
         let success = final_ctx
             .steps
-            .iter()
-            .any(|s| s.result.contains("成功") || s.result.contains("完成"));
+            .last()
+            .is_some_and(|s| {
+                s.result.contains("成功")
+                    && !s.result.contains("失败")
+                    && !s.result.contains("中止")
+            });
 
         let output = final_ctx
             .steps
