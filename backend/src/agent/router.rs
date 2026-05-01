@@ -160,47 +160,67 @@ impl IntentRouter {
     }
 
     pub fn parse_simple(&self, prompt: &str) -> Option<(String, String, Option<String>)> {
-        let action = if prompt.contains("部署") || prompt.contains("发布") {
-            "deploy"
-        } else if prompt.contains("分析")
-            || prompt.contains("查看日志")
-            || prompt.contains("看日志")
-        {
-            "analyze"
-        } else if prompt.contains("查询") || prompt.contains("查看") || prompt.contains("状态") {
-            "query"
-        } else if prompt.contains("构建") || prompt.contains("编译") {
-            "build"
+        // Detect action and find keyword position to extract entity after it.
+        // This avoids destructive .replace() that corrupts job names containing
+        // Chinese keywords (e.g., "部署工具" would become "工具").
+        let (action, action_end) = if prompt.contains("部署") {
+            let pos = prompt.find("部署").unwrap();
+            ("deploy", pos + "部署".len())
+        } else if prompt.contains("发布") {
+            let pos = prompt.find("发布").unwrap();
+            ("deploy", pos + "发布".len())
+        } else if prompt.contains("查看日志") {
+            let pos = prompt.find("查看日志").unwrap();
+            ("analyze", pos + "查看日志".len())
+        } else if prompt.contains("看日志") {
+            let pos = prompt.find("看日志").unwrap();
+            ("analyze", pos + "看日志".len())
+        } else if prompt.contains("分析") {
+            let pos = prompt.find("分析").unwrap();
+            ("analyze", pos + "分析".len())
+        } else if prompt.contains("查询") {
+            let pos = prompt.find("查询").unwrap();
+            ("query", pos + "查询".len())
+        } else if prompt.contains("查看") {
+            let pos = prompt.find("查看").unwrap();
+            ("query", pos + "查看".len())
+        } else if prompt.contains("状态") {
+            let pos = prompt.find("状态").unwrap();
+            ("query", pos + "状态".len())
+        } else if prompt.contains("构建") {
+            let pos = prompt.find("构建").unwrap();
+            ("build", pos + "构建".len())
+        } else if prompt.contains("编译") {
+            let pos = prompt.find("编译").unwrap();
+            ("build", pos + "编译".len())
         } else {
             return None;
         };
 
-        let cleaned = prompt
-            .replace("部署", "")
-            .replace("发布", "")
-            .replace("构建", "")
-            .replace("编译", "")
-            .replace("查询", "")
-            .replace("查看", "")
-            .replace("分析", "")
-            .replace("看日志", "")
+        // Extract entity portion (everything after the matched action keyword)
+        let entity = prompt[action_end..].trim().to_string();
+        if entity.is_empty() {
+            return None;
+        }
+
+        // Clean structural filler words from entity only (not action keywords
+        // or potential environment names that could be branch names).
+        let cleaned = entity
             .replace("分支", "")
             .replace("的", "")
             .replace("到", "")
             .replace("在", "")
-            .replace("staging", "")
-            .replace("production", "")
-            .replace("prod", "")
-            .replace("测试", "")
-            .replace("环境", "")
             .replace("最近", "")
             .replace("一下", "")
             .replace("帮我", "")
-            .replace("日志", "")
-            .replace("状态", "")
             .trim()
             .to_string();
 
+        if cleaned.is_empty() {
+            return None;
+        }
+
+        // Parse job/branch from cleaned entity
         if let Some((job, branch)) = cleaned.split_once('/') {
             let job = job.trim().to_string();
             let branch = branch.trim().to_string();
@@ -220,12 +240,7 @@ impl IntentRouter {
             }
         }
 
-        let job = cleaned.trim().to_string();
-        if !job.is_empty() {
-            return Some((action.to_string(), job, None));
-        }
-
-        None
+        Some((action.to_string(), cleaned, None))
     }
 
     async fn parse_with_llm(&self, prompt: &str) -> Option<Intent> {
