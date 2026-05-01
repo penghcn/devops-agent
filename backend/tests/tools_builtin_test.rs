@@ -78,7 +78,11 @@ mod read_tool_tests {
         let test_file = fixture.workspace.join("test.txt");
         fs::write(&test_file, "hello world").unwrap();
 
-        let read_tool = ReadTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let read_tool = ReadTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let input = ToolInput {
             path: Some(test_file.to_str().unwrap().to_string()),
             content: None,
@@ -95,7 +99,11 @@ mod read_tool_tests {
     async fn test_read_nonexistent_file() {
         let fixture = TestFixture::setup();
 
-        let read_tool = ReadTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let read_tool = ReadTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let input = ToolInput {
             path: Some(
                 fixture
@@ -119,7 +127,11 @@ mod read_tool_tests {
     async fn test_read_path_traversal_rejected() {
         let fixture = TestFixture::setup();
 
-        let read_tool = ReadTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let read_tool = ReadTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let input = ToolInput {
             path: Some(format!("{}/../etc/passwd", fixture.workspace.display())),
             content: None,
@@ -144,7 +156,11 @@ mod read_tool_tests {
         let large_content = "x".repeat(11 * 1024 * 1024);
         fs::write(&test_file, &large_content).unwrap();
 
-        let read_tool = ReadTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let read_tool = ReadTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let input = ToolInput {
             path: Some(test_file.to_str().unwrap().to_string()),
             content: None,
@@ -168,7 +184,11 @@ mod write_tool_tests {
     async fn test_write_to_output_dir() {
         let fixture = TestFixture::setup();
 
-        let write_tool = WriteTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let write_tool = WriteTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let target = fixture.output_dir.join("test.txt");
 
         let input = ToolInput {
@@ -195,7 +215,11 @@ mod write_tool_tests {
     async fn test_write_oversized_content_rejected() {
         let fixture = TestFixture::setup();
 
-        let write_tool = WriteTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let write_tool = WriteTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let target = fixture.output_dir.join("large.txt");
 
         // 6MB 内容，超过默认 5MB 限制
@@ -220,7 +244,11 @@ mod write_tool_tests {
     async fn test_write_outside_output_dir_rejected() {
         let fixture = TestFixture::setup();
 
-        let write_tool = WriteTool::new(fixture.validator.clone(), fixture.isolator.clone(), fixture.policy_engine.clone());
+        let write_tool = WriteTool::new(
+            fixture.validator.clone(),
+            fixture.isolator.clone(),
+            fixture.policy_engine.clone(),
+        );
         let target = fixture.workspace.join("not_output.txt");
 
         let input = ToolInput {

@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, ToolCall, TokenUsage};
+use super::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
 
 /// Anthropic API configuration.
 #[derive(Debug, Clone)]
@@ -64,13 +64,10 @@ impl AnthropicProvider {
         };
 
         // Extract system message (Anthropic puts it at the top level, not in messages)
-        let system = request
-            .messages
-            .iter()
-            .find_map(|msg| match msg {
-                Message::System { content } => Some(content.clone()),
-                _ => None,
-            });
+        let system = request.messages.iter().find_map(|msg| match msg {
+            Message::System { content } => Some(content.clone()),
+            _ => None,
+        });
 
         // Convert non-system messages to Anthropic format
         let messages: Vec<serde_json::Value> = request
@@ -118,7 +115,10 @@ impl AnthropicProvider {
                 "role": "user",
                 "content": content,
             })),
-            Message::Assistant { content, tool_calls } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+            } => {
                 if content.is_empty() && tool_calls.is_empty() {
                     return None;
                 }
@@ -166,14 +166,25 @@ impl AnthropicProvider {
                         }
                     }
                     Some("tool_use") => {
-                        let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                        let name =
-                            block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                        let id = block
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = block
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let input = block
                             .get("input")
                             .cloned()
                             .unwrap_or_else(|| serde_json::json!({}));
-                        tool_calls.push(ToolCall { id, name, arguments: input });
+                        tool_calls.push(ToolCall {
+                            id,
+                            name,
+                            arguments: input,
+                        });
                     }
                     _ => {}
                 }
@@ -253,19 +264,15 @@ impl LlmProvider for AnthropicProvider {
         let status = response.status().as_u16();
 
         // Read raw body for error handling
-        let raw_body = response
-            .text()
-            .await
-            .map_err(|e| LlmError::ParseError {
-                detail: format!("Failed to read response body: {}", e),
-            })?;
+        let raw_body = response.text().await.map_err(|e| LlmError::ParseError {
+            detail: format!("Failed to read response body: {}", e),
+        })?;
 
         // Parse JSON
-        let raw_json: serde_json::Value = serde_json::from_str(&raw_body).map_err(|e| {
-            LlmError::ParseError {
+        let raw_json: serde_json::Value =
+            serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
                 detail: format!("Invalid JSON from Anthropic: {}", e),
-            }
-        })?;
+            })?;
 
         // Handle error responses
         if status >= 400 {

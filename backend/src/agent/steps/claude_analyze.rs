@@ -11,10 +11,7 @@ pub struct ClaudeAnalyzeStep {
 }
 
 impl ClaudeAnalyzeStep {
-    pub fn with_provider(
-        provider: Option<Arc<dyn LlmProvider>>,
-        model: Option<String>,
-    ) -> Self {
+    pub fn with_provider(provider: Option<Arc<dyn LlmProvider>>, model: Option<String>) -> Self {
         Self {
             llm_provider: provider,
             llm_model: model,
@@ -73,14 +70,22 @@ impl Step for ClaudeAnalyzeStep {
                     tracing::warn!(error = %e, "LlmProvider failed, falling back to Claude Code CLI");
                     match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
                         Ok(r) => r,
-                        Err(e) => return StepResult::Failed { error: e.to_string() },
+                        Err(e) => {
+                            return StepResult::Failed {
+                                error: e.to_string(),
+                            };
+                        }
                     }
                 }
             }
         } else {
             match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
                 Ok(r) => r,
-                Err(e) => return StepResult::Failed { error: e.to_string() },
+                Err(e) => {
+                    return StepResult::Failed {
+                        error: e.to_string(),
+                    };
+                }
             }
         };
 

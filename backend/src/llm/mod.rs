@@ -8,11 +8,13 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod anthropic_provider;
+pub mod config_store;
 pub mod openai_provider;
 pub mod router;
 pub mod structured_output;
 
 pub use anthropic_provider::{AnthropicConfig, AnthropicProvider};
+pub use config_store::{LlmConfigSnapshot, LlmConfigStore, LlmConfigUpdate, ProviderConfig};
 pub use openai_provider::{OpenAIConfig, OpenAIProvider};
 pub use router::{ModelRouter, ModelRouterConfig, TaskLevel};
 pub use structured_output::{StructuredOutput, StructuredOutputError};
@@ -37,8 +39,12 @@ pub trait LlmProvider: Send + Sync {
 /// A single message in a conversation turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
-    System { content: String },
-    User { content: String },
+    System {
+        content: String,
+    },
+    User {
+        content: String,
+    },
     Assistant {
         content: String,
         tool_calls: Vec<ToolCall>,
@@ -124,7 +130,9 @@ impl std::fmt::Display for LlmError {
                 write!(f, "API error {}: {}", status, truncated)
             }
             LlmError::Timeout => write!(f, "LLM API request timed out"),
-            LlmError::ParseError { detail } => write!(f, "Failed to parse LLM response: {}", detail),
+            LlmError::ParseError { detail } => {
+                write!(f, "Failed to parse LLM response: {}", detail)
+            }
             LlmError::NotFound { model } => write!(f, "Model not found: {}", model),
             LlmError::MissingApiKey { provider } => {
                 write!(f, "Missing API key for provider: {}", provider)

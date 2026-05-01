@@ -80,9 +80,5 @@ fn readonly_mount_allows_read() {
         read_only_mounts: vec![ro.clone()],
     };
     let isolator = FileSystemIsolator::new(config);
-    assert!(isolator.can_read(
-        ro.join("lib.so")
-            .to_str()
-            .unwrap()
-    ));
+    assert!(isolator.can_read(ro.join("lib.so").to_str().unwrap()));
 }

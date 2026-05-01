@@ -103,7 +103,11 @@ async fn test_e2e_multi_branch_pipeline() {
 
     let response = devops_agent::agent::process_request(req, &config, cache).await;
 
-    assert!(response.success, "E2E deploy should succeed: {}", response.output);
+    assert!(
+        response.success,
+        "E2E deploy should succeed: {}",
+        response.output
+    );
     assert!(
         response.steps.len() >= 4,
         "Should have trigger, wait, log, analyze steps"

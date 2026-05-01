@@ -3,7 +3,10 @@ use devops_agent::sandbox::network_whitelist::{NetworkCheckResult, NetworkWhitel
 #[test]
 fn curl_is_blocked() {
     let wl = NetworkWhitelist::new();
-    assert_eq!(wl.check("curl", &["https://example.com".into()]), NetworkCheckResult::Blocked);
+    assert_eq!(
+        wl.check("curl", &["https://example.com".into()]),
+        NetworkCheckResult::Blocked
+    );
 }
 
 #[test]

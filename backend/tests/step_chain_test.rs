@@ -1,3 +1,4 @@
+use devops_agent::agent::chain_mapping::to_chain_with_prompt;
 use devops_agent::agent::{Intent, IntentRouter, Step, StepContext, StepResult, TaskType};
 use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
@@ -138,13 +139,13 @@ async fn test_intent_analyze() {
 fn test_chain_deploy_pipeline() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
-    let router = IntentRouter::new(cache);
+    let _router = IntentRouter::new(cache);
     let intent = Intent::DeployPipeline {
         job_name: "ds-pkg".to_string(),
         branch: Some("dev".to_string()),
         job_type: Default::default(),
     };
-    let _chain = router.to_chain_with_prompt(&intent, "部署 ds-pkg");
+    let _chain = to_chain_with_prompt(&intent, "部署 ds-pkg", None, None);
     // StepChain 内部 steps 是私有字段，无法直接测试数量
     // 但可以通过 execute 端到端验证
 }
@@ -154,12 +155,12 @@ fn test_chain_deploy_pipeline() {
 fn test_chain_query_pipeline() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
-    let router = IntentRouter::new(cache);
+    let _router = IntentRouter::new(cache);
     let intent = Intent::QueryPipeline {
         job_name: "ds-pkg".to_string(),
         branch: Some("dev".to_string()),
         job_type: Default::default(),
     };
-    let _chain = router.to_chain_with_prompt(&intent, "查询 ds-pkg dev 状态");
+    let _chain = to_chain_with_prompt(&intent, "查询 ds-pkg dev 状态", None, None);
     // 同上，端到端验证
 }

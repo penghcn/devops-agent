@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum JobType {
@@ -127,8 +127,14 @@ pub fn intent_from_value(json: serde_json::Value) -> Result<Intent, ParseIntentE
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or(ParseIntentError)?;
-    let branch = obj.get("branch").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let job_type_str = obj.get("job_type").and_then(|v| v.as_str()).unwrap_or("standard");
+    let branch = obj
+        .get("branch")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let job_type_str = obj
+        .get("job_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("standard");
 
     let job_type = match job_type_str {
         "branch" => JobType::Branch,
@@ -160,17 +166,10 @@ pub fn intent_from_value(json: serde_json::Value) -> Result<Intent, ParseIntentE
     }
 }
 
-/// Parse LLM JSON response into Intent
+/// Parse LLM JSON response string into Intent.
+/// Extracts JSON from markdown code blocks if present, then delegates to intent_from_value.
 pub fn parse_intent_json(response: &str) -> Result<Intent, ParseIntentError> {
-    #[derive(Deserialize)]
-    struct IntentJson {
-        action: String,
-        job_name: String,
-        branch: Option<String>,
-        job_type: String,
-    }
-
-    let parsed: IntentJson = match serde_json::from_str::<IntentJson>(response) {
+    let json: Value = match serde_json::from_str(response) {
         Ok(v) => v,
         Err(_) => {
             let start = response.find('{').unwrap_or(0);
@@ -179,34 +178,94 @@ pub fn parse_intent_json(response: &str) -> Result<Intent, ParseIntentError> {
         }
     };
 
-    let job_type = match parsed.job_type.as_str() {
-        "branch" => JobType::Branch,
-        _ => JobType::Standard,
-    };
+    intent_from_value(json)
+}
 
-    let intent = match parsed.action.as_str() {
-        "deploy" => Intent::DeployPipeline {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
-            job_type,
-        },
-        "build" => Intent::BuildPipeline {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
-            job_type,
-        },
-        "query" => Intent::QueryPipeline {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
-            job_type,
-        },
-        "analyze" => Intent::AnalyzeBuild {
-            job_name: parsed.job_name,
-            branch: parsed.branch,
-            job_type,
-        },
-        _ => return Err(ParseIntentError),
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    Ok(intent)
+    #[test]
+    fn intent_from_value_deploy() {
+        let json = serde_json::json!({
+            "action": "deploy",
+            "job_name": "backend-api",
+            "branch": "main",
+            "job_type": "branch"
+        });
+        let intent = intent_from_value(json).unwrap();
+        assert!(matches!(intent, Intent::DeployPipeline { .. }));
+        let (job, branch) = extract_fields(&intent);
+        assert_eq!(job, Some("backend-api".into()));
+        assert_eq!(branch, Some("main".into()));
+    }
+
+    #[test]
+    fn intent_from_value_build_no_branch() {
+        let json = serde_json::json!({
+            "action": "build",
+            "job_name": "frontend-app"
+        });
+        let intent = intent_from_value(json).unwrap();
+        assert!(matches!(intent, Intent::BuildPipeline { .. }));
+        assert!(!intent.branch_is_some());
+    }
+
+    #[test]
+    fn intent_from_value_query() {
+        let json = serde_json::json!({
+            "action": "query",
+            "job_name": "ds-pkg",
+            "branch": "dev"
+        });
+        let intent = intent_from_value(json).unwrap();
+        assert!(matches!(intent, Intent::QueryPipeline { .. }));
+    }
+
+    #[test]
+    fn intent_from_value_analyze() {
+        let json = serde_json::json!({
+            "action": "analyze",
+            "job_name": "ds-pkg"
+        });
+        let intent = intent_from_value(json).unwrap();
+        assert!(matches!(intent, Intent::AnalyzeBuild { .. }));
+    }
+
+    #[test]
+    fn intent_from_value_invalid_action() {
+        let json = serde_json::json!({
+            "action": "unknown",
+            "job_name": "test"
+        });
+        assert!(intent_from_value(json).is_err());
+    }
+
+    #[test]
+    fn intent_from_value_missing_job_name() {
+        let json = serde_json::json!({
+            "action": "deploy"
+        });
+        assert!(intent_from_value(json).is_err());
+    }
+
+    #[test]
+    fn intent_from_value_not_object() {
+        let json = serde_json::json!([1, 2, 3]);
+        assert!(intent_from_value(json).is_err());
+    }
+
+    #[test]
+    fn parse_intent_json_with_markdown() {
+        let response = "```json\n{\"action\":\"build\",\"job_name\":\"test-app\"}\n```";
+        let intent = parse_intent_json(response).unwrap();
+        assert!(matches!(intent, Intent::BuildPipeline { .. }));
+    }
+
+    #[test]
+    fn parse_intent_json_plain() {
+        let response = r#"{"action":"deploy","job_name":"api","branch":"dev","job_type":"branch"}"#;
+        let intent = parse_intent_json(response).unwrap();
+        assert!(matches!(intent, Intent::DeployPipeline { .. }));
+    }
 }

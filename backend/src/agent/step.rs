@@ -77,8 +77,8 @@ impl StepContext {
             step_elapsed: Vec::new(),
             identify_elapsed: None,
             branch_correction: None,
-        llm_provider: None,
-        llm_model: None,
+            llm_provider: None,
+            llm_model: None,
         }
     }
 

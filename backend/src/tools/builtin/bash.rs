@@ -57,11 +57,7 @@ impl Tool for BashTool {
         let cmd = &input.arguments[0];
 
         // 命令白名单检查：防止 PATH 劫持
-        let cmd_name = cmd
-            .split('/')
-            .next_back()
-            .unwrap_or(cmd)
-            .to_lowercase();
+        let cmd_name = cmd.split('/').next_back().unwrap_or(cmd).to_lowercase();
         if !is_allowed_command(&cmd_name) {
             return ToolOutput::fail(format!("命令不在允许列表中: {}", cmd));
         }
@@ -110,18 +106,70 @@ impl Tool for BashTool {
 fn is_allowed_command(cmd: &str) -> bool {
     matches!(
         cmd,
-        "ls" | "cat" | "echo" | "grep" | "find" | "diff" | "wc"
-            | "head" | "tail" | "sort" | "uniq" | "tr" | "cut"
-            | "sed" | "awk" | "basename" | "dirname" | "pwd"
-            | "mkdir" | "touch" | "rm" | "cp" | "mv" | "ln"
-            | "chmod" | "chown" | "stat" | "file" | "du" | "df"
-            | "tar" | "zip" | "unzip" | "gzip" | "gunzip"
-            | "md5sum" | "sha256sum" | "xxd" | "hexdump"
-            | "env" | "printenv" | "which" | "type"
-            | "test" | "true" | "false" | "sleep" | "date"
-            | "id" | "whoami" | "uname" | "hostname"
-            | "ps" | "kill" | "pgrep" | "pkill"
-            | "tree" | "less" | "more" | "column" | "join"
-            | "paste" | "comm" | "shuf" | "nl" | "fold"
+        "ls" | "cat"
+            | "echo"
+            | "grep"
+            | "find"
+            | "diff"
+            | "wc"
+            | "head"
+            | "tail"
+            | "sort"
+            | "uniq"
+            | "tr"
+            | "cut"
+            | "sed"
+            | "awk"
+            | "basename"
+            | "dirname"
+            | "pwd"
+            | "mkdir"
+            | "touch"
+            | "rm"
+            | "cp"
+            | "mv"
+            | "ln"
+            | "chmod"
+            | "chown"
+            | "stat"
+            | "file"
+            | "du"
+            | "df"
+            | "tar"
+            | "zip"
+            | "unzip"
+            | "gzip"
+            | "gunzip"
+            | "md5sum"
+            | "sha256sum"
+            | "xxd"
+            | "hexdump"
+            | "env"
+            | "printenv"
+            | "which"
+            | "type"
+            | "test"
+            | "true"
+            | "false"
+            | "sleep"
+            | "date"
+            | "id"
+            | "whoami"
+            | "uname"
+            | "hostname"
+            | "ps"
+            | "kill"
+            | "pgrep"
+            | "pkill"
+            | "tree"
+            | "less"
+            | "more"
+            | "column"
+            | "join"
+            | "paste"
+            | "comm"
+            | "shuf"
+            | "nl"
+            | "fold"
     )
 }

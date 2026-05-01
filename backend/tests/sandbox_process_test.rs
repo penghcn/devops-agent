@@ -1,4 +1,4 @@
-use devops_agent::sandbox::process_sandbox::{ProcessResult, ProcessSandbox, ProcessSandboxConfig};
+use devops_agent::sandbox::process_sandbox::{ProcessSandbox, ProcessSandboxConfig};
 
 #[test]
 fn normal_command_executes() {
@@ -42,17 +42,15 @@ fn large_output_is_truncated() {
     let config = ProcessSandboxConfig {
         timeout_secs: 5,
         max_output_bytes: 50,
-        allowed_env_keys: vec![
-            "PATH".into(),
-            "HOME".into(),
-            "LANG".into(),
-            "LC_ALL".into(),
-        ],
+        allowed_env_keys: vec!["PATH".into(), "HOME".into(), "LANG".into(), "LC_ALL".into()],
     };
     let sandbox = ProcessSandbox::with_config(config);
     // Generate more than 50 bytes of output
     let result = sandbox
-        .execute("echo", &["aaaabbbbccccddddeeeeFFFFgggghhhh111122223333444455556666".into()])
+        .execute(
+            "echo",
+            &["aaaabbbbccccddddeeeeFFFFgggghhhh111122223333444455556666".into()],
+        )
         .unwrap();
     assert!(result.truncated, "output should be truncated");
     assert!(result.stdout.ends_with("[...truncated]"));

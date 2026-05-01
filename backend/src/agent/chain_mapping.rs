@@ -17,15 +17,13 @@ pub fn to_chain_with_prompt(
     llm_model: Option<String>,
 ) -> StepChain {
     match intent {
-        Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => {
-            StepChain::new(vec![
-                Box::new(JobValidateStep),
-                Box::new(JenkinsTriggerStep),
-                Box::new(JenkinsWaitStep::default()),
-                Box::new(JenkinsLogStep),
-                Box::new(ClaudeAnalyzeStep::with_provider(llm_provider, llm_model)),
-            ])
-        }
+        Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
+            Box::new(JobValidateStep),
+            Box::new(JenkinsTriggerStep),
+            Box::new(JenkinsWaitStep::default()),
+            Box::new(JenkinsLogStep),
+            Box::new(ClaudeAnalyzeStep::with_provider(llm_provider, llm_model)),
+        ]),
         Intent::QueryPipeline { .. } => {
             StepChain::new(vec![Box::new(JobValidateStep), Box::new(JenkinsStatusStep)])
         }

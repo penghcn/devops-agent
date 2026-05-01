@@ -95,7 +95,13 @@ impl ModelRouter {
 
         // Complex keywords indicate L2
         let complex_keywords = [
-            "分析", "analyze", "日志", "log", "debug", "故障", "root cause",
+            "分析",
+            "analyze",
+            "日志",
+            "log",
+            "debug",
+            "故障",
+            "root cause",
         ];
         if complex_keywords.iter().any(|kw| prompt.contains(kw)) {
             return TaskLevel::L2;
@@ -178,9 +184,11 @@ impl ModelRouter {
         );
 
         // Find provider for target model
-        let provider = self.find_provider_for_model(model).ok_or_else(|| LlmError::NotFound {
-            model: model.to_string(),
-        })?;
+        let provider = self
+            .find_provider_for_model(model)
+            .ok_or_else(|| LlmError::NotFound {
+                model: model.to_string(),
+            })?;
 
         // Build new request with selected model
         let mut routed_request = request.clone();
@@ -188,5 +196,24 @@ impl ModelRouter {
 
         // Call the provider
         provider.chat(&routed_request).await
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for ModelRouter {
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        // If the request specifies a model, route to the right provider
+        if !request.model.is_empty() {
+            if let Some(provider) = self.find_provider_for_model(&request.model) {
+                return provider.chat(request).await;
+            }
+        }
+
+        // Fallback: use task-level routing
+        self.route(request).await
+    }
+
+    fn provider_id(&self) -> &str {
+        "router"
     }
 }

@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use super::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, ToolCall, TokenUsage};
+use super::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
 
 /// OpenAI API configuration.
 #[derive(Debug, Clone)]
@@ -107,7 +107,10 @@ impl OpenAIProvider {
                 "role": "user",
                 "content": content,
             })),
-            Message::Assistant { content, tool_calls } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+            } => {
                 if content.is_empty() && tool_calls.is_empty() {
                     return None;
                 }
@@ -166,18 +169,18 @@ impl OpenAIProvider {
                     .iter()
                     .filter_map(|call| {
                         let id = call.get("id")?.as_str()?.to_string();
-                        let name = call
-                            .get("function")?
-                            .get("name")?
-                            .as_str()?
-                            .to_string();
+                        let name = call.get("function")?.get("name")?.as_str()?.to_string();
                         let args_str = call
                             .get("function")?
                             .get("arguments")?
                             .as_str()?
                             .to_string();
                         let arguments = serde_json::from_str(&args_str).ok()?;
-                        Some(ToolCall { id, name, arguments })
+                        Some(ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        })
                     })
                     .collect()
             })
@@ -254,19 +257,15 @@ impl LlmProvider for OpenAIProvider {
         let status = response.status().as_u16();
 
         // Read raw body for error handling
-        let raw_body = response
-            .text()
-            .await
-            .map_err(|e| LlmError::ParseError {
-                detail: format!("Failed to read response body: {}", e),
-            })?;
+        let raw_body = response.text().await.map_err(|e| LlmError::ParseError {
+            detail: format!("Failed to read response body: {}", e),
+        })?;
 
         // Parse JSON
-        let raw_json: serde_json::Value = serde_json::from_str(&raw_body).map_err(|e| {
-            LlmError::ParseError {
+        let raw_json: serde_json::Value =
+            serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
                 detail: format!("Invalid JSON from OpenAI: {}", e),
-            }
-        })?;
+            })?;
 
         // Handle error responses
         if status >= 400 {

@@ -56,14 +56,22 @@ impl Step for ClaudeCodeStep {
                     tracing::warn!(error = %e, "LlmProvider failed, falling back to Claude Code CLI");
                     match claude::call_claude_code(&self.prompt, &self.allowed_tools).await {
                         Ok(r) => r,
-                        Err(e) => return StepResult::Failed { error: e.to_string() },
+                        Err(e) => {
+                            return StepResult::Failed {
+                                error: e.to_string(),
+                            };
+                        }
                     }
                 }
             }
         } else {
             match claude::call_claude_code(&self.prompt, &self.allowed_tools).await {
                 Ok(r) => r,
-                Err(e) => return StepResult::Failed { error: e.to_string() },
+                Err(e) => {
+                    return StepResult::Failed {
+                        error: e.to_string(),
+                    };
+                }
             }
         };
 

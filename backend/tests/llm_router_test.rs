@@ -79,7 +79,10 @@ fn test_model_router_new() {
     let config = ModelRouterConfig::default();
     let router = ModelRouter::new(config);
     assert_eq!(router.select_model(TaskLevel::L1), "gpt-4o-mini");
-    assert_eq!(router.select_model(TaskLevel::L2), "claude-sonnet-4-20250514");
+    assert_eq!(
+        router.select_model(TaskLevel::L2),
+        "claude-sonnet-4-20250514"
+    );
 }
 
 #[test]
@@ -115,7 +118,10 @@ fn test_classify_long_prompt_l2() {
 fn test_classify_complex_keyword_l2() {
     let router = ModelRouter::default();
     assert_eq!(router.classify_task("分析这个日志"), TaskLevel::L2);
-    assert_eq!(router.classify_task("Please analyze the build output"), TaskLevel::L2);
+    assert_eq!(
+        router.classify_task("Please analyze the build output"),
+        TaskLevel::L2
+    );
     assert_eq!(router.classify_task("查看日志输出"), TaskLevel::L2);
     assert_eq!(router.classify_task("debug this issue"), TaskLevel::L2);
     assert_eq!(router.classify_task("故障排查"), TaskLevel::L2);
@@ -260,7 +266,9 @@ async fn test_structured_output_execute_valid_json() {
 async fn test_structured_output_extract_json_codeblock() {
     let provider: Arc<dyn LlmProvider> = Arc::new(TestProvider {
         id: "mock".to_string(),
-        response: "Here is the result:\n```json\n{\"action\":\"build\",\"job_name\":\"test\"}\n```\nDone.".to_string(),
+        response:
+            "Here is the result:\n```json\n{\"action\":\"build\",\"job_name\":\"test\"}\n```\nDone."
+                .to_string(),
     });
     let schema = serde_json::json!({"type": "object"});
 
@@ -272,7 +280,8 @@ async fn test_structured_output_extract_json_codeblock() {
         job_name: String,
     }
 
-    let build_res: std::result::Result<BuildResult, StructuredOutputError> = so.execute("test").await;
+    let build_res: std::result::Result<BuildResult, StructuredOutputError> =
+        so.execute("test").await;
     assert!(build_res.is_ok());
     assert_eq!(build_res.unwrap().action, "build");
 }
@@ -292,7 +301,8 @@ async fn test_structured_output_braces_extraction() {
         action: String,
     }
 
-    let query_res: std::result::Result<QueryResult, StructuredOutputError> = so.execute("test").await;
+    let query_res: std::result::Result<QueryResult, StructuredOutputError> =
+        so.execute("test").await;
     assert!(query_res.is_ok());
     assert_eq!(query_res.unwrap().action, "query");
 }
@@ -300,8 +310,8 @@ async fn test_structured_output_braces_extraction() {
 #[tokio::test]
 async fn test_structured_output_retry_on_failure() {
     // First response fails, second succeeds
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     struct RetryProvider {
         id: String,
@@ -310,7 +320,10 @@ async fn test_structured_output_retry_on_failure() {
 
     #[async_trait]
     impl LlmProvider for RetryProvider {
-        async fn chat(&self, _request: &ChatRequest) -> std::result::Result<ChatResponse, LlmError> {
+        async fn chat(
+            &self,
+            _request: &ChatRequest,
+        ) -> std::result::Result<ChatResponse, LlmError> {
             let count = self.call_count.fetch_add(1, Ordering::SeqCst);
             let content = if count == 0 {
                 "not valid json at all"
@@ -344,7 +357,8 @@ async fn test_structured_output_retry_on_failure() {
         action: String,
     }
 
-    let deploy_res: std::result::Result<DeployResult, StructuredOutputError> = so.execute("test").await;
+    let deploy_res: std::result::Result<DeployResult, StructuredOutputError> =
+        so.execute("test").await;
     assert!(deploy_res.is_ok());
     assert_eq!(deploy_res.unwrap().action, "deploy");
 }
@@ -357,15 +371,15 @@ async fn test_structured_output_max_retries_exceeded() {
     });
     let schema = serde_json::json!({"type": "object", "required": ["action"]});
 
-    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema)
-        .with_max_retries(2);
+    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema).with_max_retries(2);
 
     #[derive(serde::Deserialize, Debug)]
     struct ActionResult {
         action: String,
     }
 
-    let action_res: std::result::Result<ActionResult, StructuredOutputError> = so.execute("test").await;
+    let action_res: std::result::Result<ActionResult, StructuredOutputError> =
+        so.execute("test").await;
     assert!(action_res.is_err());
     match action_res.unwrap_err() {
         StructuredOutputError::MaxRetriesExceeded { responses } => {

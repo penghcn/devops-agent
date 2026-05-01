@@ -64,7 +64,10 @@ impl std::fmt::Display for StructuredOutputError {
                     f,
                     "Max retries exceeded after {} attempts: {:?}",
                     responses.len(),
-                    responses.iter().map(|r| &r[..r.len().min(50)]).collect::<Vec<_>>()
+                    responses
+                        .iter()
+                        .map(|r| &r[..r.len().min(50)])
+                        .collect::<Vec<_>>()
                 )
             }
         }
@@ -92,11 +95,7 @@ pub struct StructuredOutput {
 
 impl StructuredOutput {
     /// Create a new structured output wrapper.
-    pub fn new(
-        provider: Arc<dyn LlmProvider>,
-        model: String,
-        schema: serde_json::Value,
-    ) -> Self {
+    pub fn new(provider: Arc<dyn LlmProvider>, model: String, schema: serde_json::Value) -> Self {
         Self {
             provider,
             model,
@@ -144,20 +143,11 @@ impl StructuredOutput {
                     },
                 ]
             } else {
-                // Retry: include the error from the last attempt
-                let last_error = match failed_responses.last() {
-                    Some(resp) => {
-                        // Try to parse to get a meaningful error
-                        match serde_json::from_str::<serde_json::Value>(resp) {
-                            Ok(_) => {
-                                "上一次输出格式不符合预期 schema".to_string()
-                            }
-                            Err(e) => {
-                                format!("上一次输出不是有效的 JSON: {}", e)
-                            }
-                        }
-                    }
-                    None => "上一次输出不符合预期格式".to_string(),
+                // Retry: show the LLM its previous (failed) output so it can self-correct
+                let last_response = failed_responses.last().map(|s| s.as_str()).unwrap_or("");
+                let last_error = match serde_json::from_str::<serde_json::Value>(last_response) {
+                    Ok(_) => "上一次输出格式不符合预期 schema".to_string(),
+                    Err(e) => format!("上一次输出不是有效的 JSON: {}", e),
                 };
 
                 vec![
@@ -165,9 +155,16 @@ impl StructuredOutput {
                         content: system_content.clone(),
                     },
                     Message::User {
+                        content: user_prompt.to_string(),
+                    },
+                    Message::Assistant {
+                        content: last_response.to_string(),
+                        tool_calls: Vec::new(),
+                    },
+                    Message::User {
                         content: format!(
-                            "你的上一次输出不符合 JSON Schema。错误: {}。\n\n原始请求: {}\n\n请重新输出符合以下 Schema 的 JSON:\n{}",
-                            last_error, user_prompt, self.schema
+                            "你的上一次输出不符合 JSON Schema。错误: {}。\n\n请重新输出符合以下 Schema 的 JSON:\n{}",
+                            last_error, self.schema
                         ),
                     },
                 ]
@@ -259,13 +256,11 @@ impl StructuredOutput {
                     v.to_string().chars().take(100).collect::<String>()
                 ))
             }
-            Err(e) => {
-                Err(format!(
-                    "Failed to parse JSON: {} (content preview: {})",
-                    e,
-                    trimmed.chars().take(80).collect::<String>()
-                ))
-            }
+            Err(e) => Err(format!(
+                "Failed to parse JSON: {} (content preview: {})",
+                e,
+                trimmed.chars().take(80).collect::<String>()
+            )),
         }
     }
 

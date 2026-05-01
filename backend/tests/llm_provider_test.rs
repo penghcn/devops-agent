@@ -34,7 +34,10 @@ fn test_message_enum_variants() {
     }
 
     match assistant {
-        Message::Assistant { content, tool_calls } => {
+        Message::Assistant {
+            content,
+            tool_calls,
+        } => {
             assert_eq!(content, "Hi there");
             assert!(tool_calls.is_empty());
         }
@@ -143,7 +146,10 @@ fn test_token_usage_values() {
         completion_tokens: 50,
         total_tokens: 150,
     };
-    assert_eq!(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens);
+    assert_eq!(
+        usage.total_tokens,
+        usage.prompt_tokens + usage.completion_tokens
+    );
 }
 
 /// Test: LlmError variants exist and implement Display

@@ -1,49 +1,71 @@
-use crate::agent::intent::{
-    extract_fields, intent_from_value, replace_intent_fields, Intent, JobType,
-};
 use crate::agent::chain_mapping::to_chain_with_prompt;
+use crate::agent::intent::{
+    Intent, JobType, extract_fields, intent_from_value, replace_intent_fields,
+};
 use crate::agent::{AgentResponse, StepContext, TaskType};
 use crate::config::Config;
 use crate::llm::{LlmProvider, StructuredOutput};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
+/// Strip structural filler words from the leading and trailing edges of a string.
+/// Only removes complete words at boundaries, never embedded text.
+pub(crate) fn strip_fillers(s: &str) -> String {
+    let fillers = ["分支", "的", "到", "在", "最近", "一下", "帮我"];
+    let mut result = s.to_string();
+
+    // Strip leading fillers
+    for _ in 0..fillers.len() {
+        if let Some(rest) = fillers.iter().find_map(|f| result.strip_prefix(*f)) {
+            result = rest.trim_start().to_string();
+        } else {
+            break;
+        }
+    }
+
+    // Strip trailing fillers
+    for _ in 0..fillers.len() {
+        if let Some(rest) = fillers.iter().find_map(|f| result.strip_suffix(*f)) {
+            result = rest.trim_end().to_string();
+        } else {
+            break;
+        }
+    }
+
+    result
+}
+
 fn levenshtein_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());
-    let mut dp = vec![vec![0usize; n + 1]; m + 1];
-    for (i, row) in dp.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    for (j, row) in dp[0].iter_mut().enumerate() {
-        *row = j;
-    }
+    let mut prev = (0..=n).collect::<Vec<usize>>();
+    let mut curr = vec![0usize; n + 1];
     for i in 1..=m {
+        curr[0] = i;
         for j in 1..=n {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
+        std::mem::swap(&mut prev, &mut curr);
     }
-    dp[m][n]
+    prev[n]
 }
 
 /// Find the best matching branch name in the cache.
 /// Returns (matched_branch, was_corrected) where was_corrected is true
 /// if the matched branch differs from the input.
-fn find_branch_match(
-    user_branch: &str,
-    cached_branches: &[String],
-) -> (String, bool) {
+fn find_branch_match(user_branch: &str, cached_branches: &[String]) -> (String, bool) {
     // Exact match
     if let Some(found) = cached_branches.iter().find(|cb| cb == &user_branch) {
         return (found.clone(), false);
     }
 
     // Prefix match
-    if let Some(found) = cached_branches.iter().find(|cb| cb.starts_with(user_branch)) {
+    if let Some(found) = cached_branches
+        .iter()
+        .find(|cb| cb.starts_with(user_branch))
+    {
         return (found.clone(), true);
     }
 
@@ -133,8 +155,7 @@ impl IntentRouter {
             let mut correction: Option<(String, String)> = None;
 
             let branch = if let Some(b) = &branch {
-                let (matched, was_corrected) =
-                    find_branch_match(b, &cached.branches);
+                let (matched, was_corrected) = find_branch_match(b, &cached.branches);
                 if was_corrected {
                     correction = Some((b.clone(), matched.clone()));
                 }
@@ -145,7 +166,10 @@ impl IntentRouter {
 
             tracing::info!(
                 "Intent regex match: action='{}', job='{}', branch={:?}, correction={:?} (from cache)",
-                action, job_name, branch, correction
+                action,
+                job_name,
+                branch,
+                correction
             );
             return Some((build_intent(action, &job_name, branch, jt), correction));
         }
@@ -153,7 +177,9 @@ impl IntentRouter {
         let branch = branch.filter(|b| !b.is_empty());
         tracing::info!(
             "Intent regex match: action='{}', job='{}', branch={:?} (from cache)",
-            action, job_name, branch
+            action,
+            job_name,
+            branch
         );
 
         Some((build_intent(action, &job_name, branch, jt), None))
@@ -203,18 +229,10 @@ impl IntentRouter {
             return None;
         }
 
-        // Clean structural filler words from entity only (not action keywords
-        // or potential environment names that could be branch names).
-        let cleaned = entity
-            .replace("分支", "")
-            .replace("的", "")
-            .replace("到", "")
-            .replace("在", "")
-            .replace("最近", "")
-            .replace("一下", "")
-            .replace("帮我", "")
-            .trim()
-            .to_string();
+        // Strip structural filler words from entity boundaries only.
+        // Using .replace() would corrupt job/branch names containing
+        // these characters (e.g. "我的测试" → "我测试").
+        let cleaned = strip_fillers(&entity).trim().to_string();
 
         if cleaned.is_empty() {
             return None;
@@ -263,7 +281,7 @@ impl IntentRouter {
                     "branch": {"type": "string", "nullable": true},
                     "job_type": {"type": "string", "enum": ["standard", "branch"]}
                 }
-            })
+            }),
         );
 
         match so.execute::<serde_json::Value>(&intent_prompt).await {
@@ -292,7 +310,9 @@ impl IntentRouter {
         {
             tracing::info!(
                 "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
-                raw_job, job, branch
+                raw_job,
+                job,
+                branch
             );
             return replace_intent_fields(
                 &intent,
@@ -314,18 +334,20 @@ impl IntentRouter {
                 if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
                     tracing::info!(
                         "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split)",
-                        raw_job, job, branch
+                        raw_job,
+                        job,
+                        branch
                     );
                     return replace_intent_fields(
-                    &intent,
-                    job,
-                    Some(branch),
-                    if cached.job_type == "pipeline_multibranch" {
-                        JobType::Branch
-                    } else {
-                        JobType::Standard
-                    },
-                );
+                        &intent,
+                        job,
+                        Some(branch),
+                        if cached.job_type == "pipeline_multibranch" {
+                            JobType::Branch
+                        } else {
+                            JobType::Standard
+                        },
+                    );
                 }
             }
         }
@@ -353,15 +375,9 @@ impl IntentRouter {
 
         let (job_name, branch) = extract_fields(&intent);
 
-        let mut ctx = StepContext::new(
-            prompt.to_string(),
-            task_type,
-            job_name,
-            branch,
-            config,
-        )
-        .with_cache(self.cache.clone())
-        .with_identify_elapsed(identify_elapsed);
+        let mut ctx = StepContext::new(prompt.to_string(), task_type, job_name, branch, config)
+            .with_cache(self.cache.clone())
+            .with_identify_elapsed(identify_elapsed);
 
         if let Some(provider) = llm_provider {
             ctx = ctx.with_llm_provider(provider);
@@ -377,14 +393,9 @@ impl IntentRouter {
 
         let (final_ctx, steps) = chain.execute(ctx).await;
 
-        let success = final_ctx
-            .steps
-            .last()
-            .is_some_and(|s| {
-                s.result.contains("成功")
-                    && !s.result.contains("失败")
-                    && !s.result.contains("中止")
-            });
+        let success = final_ctx.steps.last().is_some_and(|s| {
+            s.result.contains("成功") && !s.result.contains("失败") && !s.result.contains("中止")
+        });
 
         let output = final_ctx
             .steps
@@ -410,12 +421,7 @@ impl IntentRouter {
     }
 }
 
-fn build_intent(
-    action: &str,
-    job_name: &str,
-    branch: Option<String>,
-    job_type: JobType,
-) -> Intent {
+fn build_intent(action: &str, job_name: &str, branch: Option<String>, job_type: JobType) -> Intent {
     match action {
         "deploy" => Intent::DeployPipeline {
             job_name: job_name.to_string(),
@@ -438,5 +444,112 @@ fn build_intent(
             job_type,
         },
         _ => Intent::General,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── strip_fillers tests ──
+
+    #[test]
+    fn strip_fillers_removes_leading() {
+        assert_eq!(strip_fillers("最近的 dev"), "dev");
+        assert_eq!(strip_fillers("帮我 dev"), "dev");
+    }
+
+    #[test]
+    fn strip_fillers_removes_trailing() {
+        assert_eq!(strip_fillers("dev 分支"), "dev");
+        assert_eq!(strip_fillers("main 一下"), "main");
+    }
+
+    #[test]
+    fn strip_fillers_removes_both_edges() {
+        assert_eq!(strip_fillers("帮我 dev 分支"), "dev");
+    }
+
+    #[test]
+    fn strip_fillers_preserves_embedded_text() {
+        // "的" in the middle should NOT be removed
+        assert_eq!(strip_fillers("我的测试"), "我的测试");
+        assert_eq!(strip_fillers("部署工具"), "部署工具");
+    }
+
+    #[test]
+    fn strip_fillers_multiple_leading() {
+        assert_eq!(strip_fillers("帮我最近的 dev"), "dev");
+    }
+
+    // ── levenshtein_distance tests ──
+
+    #[test]
+    fn levenshtein_identical() {
+        assert_eq!(levenshtein_distance("main", "main"), 0);
+    }
+
+    #[test]
+    fn levenshtein_one_substitution() {
+        assert_eq!(levenshtein_distance("dev", "de5"), 1);
+    }
+
+    #[test]
+    fn levenshtein_one_insertion() {
+        assert_eq!(levenshtein_distance("dev", "deve"), 1);
+    }
+
+    #[test]
+    fn levenshtein_empty_strings() {
+        assert_eq!(levenshtein_distance("", ""), 0);
+        assert_eq!(levenshtein_distance("abc", ""), 3);
+    }
+
+    #[test]
+    fn levenshtein_unicode() {
+        assert_eq!(levenshtein_distance("开发", "开发"), 0);
+        assert_eq!(levenshtein_distance("开发", "发布"), 2);
+    }
+
+    // ── find_branch_match tests ──
+
+    #[test]
+    fn branch_match_exact() {
+        let branches = vec!["main".into(), "dev".into(), "feature/x".into()];
+        let (matched, corrected) = find_branch_match("dev", &branches);
+        assert_eq!(matched, "dev");
+        assert!(!corrected);
+    }
+
+    #[test]
+    fn branch_match_prefix() {
+        let branches = vec!["main".into(), "feature/login".into()];
+        let (matched, corrected) = find_branch_match("feature", &branches);
+        assert_eq!(matched, "feature/login");
+        assert!(corrected);
+    }
+
+    #[test]
+    fn branch_match_levenshtein_within_threshold() {
+        let branches = vec!["main".into(), "dev".into()];
+        let (matched, corrected) = find_branch_match("de5", &branches);
+        assert_eq!(matched, "dev");
+        assert!(corrected);
+    }
+
+    #[test]
+    fn branch_match_levenshtein_beyond_threshold() {
+        let branches = vec!["main".into(), "develop".into()];
+        let (matched, corrected) = find_branch_match("hotfix", &branches);
+        assert_eq!(matched, "hotfix");
+        assert!(!corrected);
+    }
+
+    #[test]
+    fn branch_match_no_match_returns_original() {
+        let branches: Vec<String> = vec![];
+        let (matched, corrected) = find_branch_match("unknown", &branches);
+        assert_eq!(matched, "unknown");
+        assert!(!corrected);
     }
 }

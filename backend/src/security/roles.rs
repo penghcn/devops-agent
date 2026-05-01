@@ -108,12 +108,7 @@ mod tests {
 
     #[test]
     fn test_tool_request_optional_path() {
-        let req = ToolRequest::new(
-            Role::Viewer,
-            ToolName::Read,
-            None,
-            vec![],
-        );
+        let req = ToolRequest::new(Role::Viewer, ToolName::Read, None, vec![]);
 
         assert_eq!(req.target_path, None);
         assert!(req.arguments.is_empty());
