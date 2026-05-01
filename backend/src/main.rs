@@ -8,12 +8,14 @@ use axum::{
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
+use devops_agent::llm::LlmConfigStore;
 use devops_agent::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 
 #[derive(Clone)]
 struct AppState {
     config: devops_agent::config::Config,
     cache_manager: Arc<JenkinsCacheManager>,
+    llm_config_store: Arc<LlmConfigStore>,
 }
 
 #[tokio::main]
@@ -26,6 +28,9 @@ async fn main() {
     // 加载配置
     let config = devops_agent::config::Config::from_env();
     let cache_manager = Arc::new(JenkinsCacheManager::new(config.clone()));
+
+    // 初始化 LLM 配置存储（从环境变量加载）
+    let llm_config_store = Arc::new(init_llm_config_store(&config));
 
     // 启动时异步加载缓存
     let cache_clone = cache_manager.clone();
@@ -52,21 +57,23 @@ async fn main() {
     let state = Arc::new(AppState {
         config,
         cache_manager,
+        llm_config_store,
     });
 
     // 构建路由
     let app = Router::new()
         .route("/api/agent", post(handle_agent))
         .route("/api/cache", get(handle_cache))
+        .route("/api/llm/config", get(handle_get_llm_config))
         .layer(CorsLayer::new().allow_origin(Any))
         .with_state(state);
 
-    tracing::info!("Server running on http://localhost:3000");
-    let listener = match tokio::net::TcpListener::bind("0.0.0.0:3000").await {
+    tracing::info!("Server running on http://localhost:8080");
+    let listener = match tokio::net::TcpListener::bind("0.0.0.0:8080").await {
         Ok(l) => l,
         Err(e) => {
-            tracing::error!("Failed to bind to port 3000: {}", e);
-            eprintln!("错误: 无法绑定端口 3000 (端口可能已被占用)");
+            tracing::error!("Failed to bind to port 8080: {}", e);
+            eprintln!("错误: 无法绑定端口 8080 (端口可能已被占用)");
             std::process::exit(1);
         }
     };
@@ -77,12 +84,27 @@ async fn main() {
     }
 }
 
+/// 从环境变量初始化 LlmConfigStore
+fn init_llm_config_store(config: &devops_agent::config::Config) -> LlmConfigStore {
+    LlmConfigStore::from_env(
+        config.openai_api_key.as_deref(),
+        config.openai_base_url.as_deref(),
+        config.anthropic_api_key.as_deref(),
+        config.anthropic_base_url.as_deref(),
+    )
+}
+
 async fn handle_agent(
     State(state): State<Arc<AppState>>,
     Json(req): Json<devops_agent::agent::AgentRequest>,
 ) -> impl IntoResponse {
-    let response =
-        devops_agent::agent::process_request(req, &state.config, state.cache_manager.clone()).await;
+    let response = devops_agent::agent::process_request_with_store(
+        req,
+        &state.config,
+        state.cache_manager.clone(),
+        &state.llm_config_store,
+    )
+    .await;
     Json(response)
 }
 
@@ -96,3 +118,13 @@ async fn handle_cache(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         }),
     }
 }
+
+/// GET /api/llm/config — 获取当前 LLM 配置（api_key 已脱敏）
+async fn handle_get_llm_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let snapshot = state.llm_config_store.snapshot().with_masked_keys();
+    Json(serde_json::json!({
+        "success": true,
+        "config": snapshot
+    }))
+}
+
