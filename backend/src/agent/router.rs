@@ -47,14 +47,14 @@ fn find_branch_match(
         return (found.clone(), true);
     }
 
-    // Levenshtein distance match (threshold: 1)
-    if let Some(best) = cached_branches
+    // Levenshtein distance match (threshold: 1) — compute distance once per candidate
+    if let Some((best, dist)) = cached_branches
         .iter()
-        .min_by_key(|cb| levenshtein_distance(user_branch, cb))
+        .map(|cb| (cb.as_str(), levenshtein_distance(user_branch, cb)))
+        .min_by_key(|(_, d)| *d)
     {
-        let dist = levenshtein_distance(user_branch, best);
         if dist <= 1 {
-            return (best.clone(), true);
+            return (best.to_string(), true);
         }
     }
 
