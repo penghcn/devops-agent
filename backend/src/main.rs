@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use devops_agent::llm::LlmConfigStore;
+use devops_agent::llm::{ChatRequest, Message};
 use devops_agent::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 
 #[derive(Clone)]
@@ -32,12 +33,91 @@ async fn main() {
     // 初始化 LLM 配置存储（从环境变量加载）
     let llm_config_store = Arc::new(init_llm_config_store(&config));
 
+    // 打印启动配置概览
+    let snapshot = llm_config_store.snapshot();
+    let mut providers = Vec::new();
+    if snapshot.openai.api_key.is_some() {
+        let model = snapshot
+            .openai
+            .model_flash
+            .as_deref()
+            .unwrap_or("gpt-4o-mini");
+        let base = snapshot
+            .openai
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        providers.push(format!("OpenAI(model={}, base={})", model, base));
+    }
+    if snapshot.anthropic.api_key.is_some() {
+        let model = snapshot
+            .anthropic
+            .model_flash
+            .as_deref()
+            .unwrap_or("claude-sonnet-4-20250514");
+        let base = snapshot
+            .anthropic
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com");
+        providers.push(format!("Anthropic(model={}, base={})", model, base));
+    }
+    tracing::info!(
+        version = "0.1.0",
+        providers = providers.join(", "),
+        "DevOps Agent starting"
+    );
+
     // 启动时异步加载缓存
     let cache_clone = cache_manager.clone();
     tokio::spawn(async move {
         match cache_clone.refresh().await {
-            Ok(()) => tracing::info!("Jenkins cache loaded successfully"),
+            Ok(()) => {
+                // 加载完成后输出缓存概览
+                let cached = cache_clone.get_cached().await;
+                if let Some(c) = cached {
+                    tracing::info!(jobs = c.jobs.len(), "Jenkins cache loaded");
+                } else {
+                    tracing::info!("Jenkins cache loaded (no jobs)");
+                }
+            }
             Err(e) => tracing::error!("Failed to load Jenkins cache: {}", e),
+        }
+    });
+
+    // 每 5 分钟异步校验 LLM 是否正常工作
+    let llm_store_clone = llm_config_store.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let router = match llm_store_clone.build_router() {
+                Some(r) => r,
+                None => {
+                    tracing::warn!("No LLM provider configured for health check");
+                    continue;
+                }
+            };
+            let req = ChatRequest {
+                model: String::new(),
+                messages: vec![Message::User {
+                    content: "你好".to_string(),
+                }],
+                tools: None,
+                temperature: Some(0.0),
+            };
+            match tokio::time::timeout(std::time::Duration::from_secs(15), router.chat(&req)).await
+            {
+                Ok(Ok(_)) => {
+                    tracing::info!("LLM health check passed");
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("LLM health check failed: {}", e);
+                }
+                Err(_) => {
+                    tracing::warn!("LLM health check timed out");
+                }
+            }
         }
     });
 
@@ -89,8 +169,12 @@ fn init_llm_config_store(config: &devops_agent::config::Config) -> LlmConfigStor
     LlmConfigStore::from_env(
         config.openai_api_key.as_deref(),
         config.openai_base_url.as_deref(),
+        config.openai_model_flash.as_deref(),
+        config.openai_model_pro.as_deref(),
         config.anthropic_api_key.as_deref(),
         config.anthropic_base_url.as_deref(),
+        config.anthropic_model_flash.as_deref(),
+        config.anthropic_model_pro.as_deref(),
     )
 }
 
@@ -127,4 +211,3 @@ async fn handle_get_llm_config(State(state): State<Arc<AppState>>) -> impl IntoR
         "config": snapshot
     }))
 }
-

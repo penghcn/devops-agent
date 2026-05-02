@@ -10,8 +10,12 @@ pub struct Config {
     pub claude_code_path: String,
     pub openai_api_key: Option<String>,
     pub openai_base_url: Option<String>,
+    pub openai_model_flash: Option<String>,
+    pub openai_model_pro: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub anthropic_base_url: Option<String>,
+    pub anthropic_model_flash: Option<String>,
+    pub anthropic_model_pro: Option<String>,
 }
 
 impl Config {
@@ -35,10 +39,14 @@ impl Config {
             claude_code_path: env::var("CLAUDE_CODE_PATH").unwrap_or_else(|_| "claude".to_string()),
             openai_api_key: env::var("OPENAI_API_KEY").ok(),
             openai_base_url: env::var("OPENAI_BASE_URL").ok(),
+            openai_model_flash: env::var("OPENAI_MODEL_FLASH").ok(),
+            openai_model_pro: env::var("OPENAI_MODEL_PRO").ok(),
             anthropic_api_key: env::var("ANTHROPIC_API_KEY")
                 .or_else(|_| env::var("ANTHROPIC_AUTH_TOKEN"))
                 .ok(),
             anthropic_base_url: env::var("ANTHROPIC_BASE_URL").ok(),
+            anthropic_model_flash: env::var("ANTHROPIC_MODEL_FLASH").ok(),
+            anthropic_model_pro: env::var("ANTHROPIC_MODEL_PRO").ok(),
         }
         .validate_llm()
     }
@@ -73,8 +81,12 @@ impl Config {
             claude_code_path: "claude".to_string(),
             openai_api_key: Some("test-openai-key".to_string()),
             openai_base_url: None,
+            openai_model_flash: None,
+            openai_model_pro: None,
             anthropic_api_key: None,
             anthropic_base_url: None,
+            anthropic_model_flash: None,
+            anthropic_model_pro: None,
         }
     }
 }

@@ -42,14 +42,19 @@ async fn test_llm_config_readonly() {
         .await
         .expect("Should reach /api/llm/config");
 
-    assert!(resp.status().is_success(), "GET /api/llm/config should succeed");
+    assert!(
+        resp.status().is_success(),
+        "GET /api/llm/config should succeed"
+    );
 
     let body = resp.json::<serde_json::Value>().await.unwrap();
     assert!(body["success"].as_bool().unwrap(), "Should return success");
     let config = &body["config"];
 
     // 验证 OpenAI 配置已加载
-    let openai = config["openai"].as_object().expect("Should have openai config");
+    let openai = config["openai"]
+        .as_object()
+        .expect("Should have openai config");
     assert!(
         openai.get("api_key").is_some(),
         "OpenAI api_key should be loaded from env"
@@ -125,7 +130,10 @@ async fn test_both_providers_configured() {
     // OpenAI 应该有 api_key 和 base_url
     let openai = config["openai"].as_object().unwrap();
     assert!(
-        openai.get("api_key").map(|v| !v.as_str().unwrap().is_empty()).unwrap_or(false),
+        openai
+            .get("api_key")
+            .map(|v| !v.as_str().unwrap().is_empty())
+            .unwrap_or(false),
         "OpenAI should have api_key"
     );
     assert!(
@@ -136,7 +144,10 @@ async fn test_both_providers_configured() {
     // Anthropic 应该有 api_key 和 base_url
     let anthropic = config["anthropic"].as_object().unwrap();
     assert!(
-        anthropic.get("api_key").map(|v| !v.as_str().unwrap().is_empty()).unwrap_or(false),
+        anthropic
+            .get("api_key")
+            .map(|v| !v.as_str().unwrap().is_empty())
+            .unwrap_or(false),
         "Anthropic should have api_key"
     );
     assert!(
@@ -146,8 +157,7 @@ async fn test_both_providers_configured() {
 
     println!(
         "Both providers configured: openai={}, anthropic={}",
-        openai["base_url"],
-        anthropic["base_url"]
+        openai["base_url"], anthropic["base_url"]
     );
 }
 
@@ -174,7 +184,11 @@ async fn test_agent_api_returns_valid_response() {
         .expect("Should reach /api/agent");
 
     let status = resp.status();
-    assert!(status.is_success(), "Agent API should return 200, got {}", status);
+    assert!(
+        status.is_success(),
+        "Agent API should return 200, got {}",
+        status
+    );
 
     let body = resp.json::<serde_json::Value>().await.unwrap();
     // 验证响应结构完整

@@ -136,8 +136,11 @@ fn build_llm_provider(config: &Config) -> Option<Arc<dyn LlmProvider>> {
             base_url: config
                 .openai_base_url
                 .clone()
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
-            default_model: "gpt-4o-mini".to_string(),
+                .unwrap_or_else(|| "https://api.openai.com".to_string()),
+            default_model: config
+                .openai_model_flash
+                .clone()
+                .unwrap_or_else(|| "gpt-4o-mini".to_string()),
             timeout_secs: 60,
         };
         match OpenAIProvider::new(cfg) {
@@ -161,7 +164,10 @@ fn build_llm_provider(config: &Config) -> Option<Arc<dyn LlmProvider>> {
                 .anthropic_base_url
                 .clone()
                 .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
-            default_model: "claude-sonnet-4-20250514".to_string(),
+            default_model: config
+                .anthropic_model_flash
+                .clone()
+                .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
             timeout_secs: 60,
         };
         match AnthropicProvider::new(cfg) {

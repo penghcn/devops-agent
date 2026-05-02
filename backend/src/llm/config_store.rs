@@ -15,7 +15,8 @@ use super::{
 pub struct ProviderConfig {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
-    pub default_model: Option<String>,
+    pub model_flash: Option<String>,
+    pub model_pro: Option<String>,
 }
 
 impl Default for ProviderConfig {
@@ -23,7 +24,8 @@ impl Default for ProviderConfig {
         Self {
             api_key: None,
             base_url: None,
-            default_model: None,
+            model_flash: None,
+            model_pro: None,
         }
     }
 }
@@ -76,8 +78,12 @@ impl LlmConfigStore {
     pub fn from_env(
         openai_api_key: Option<&str>,
         openai_base_url: Option<&str>,
+        openai_model_flash: Option<&str>,
+        openai_model_pro: Option<&str>,
         anthropic_api_key: Option<&str>,
         anthropic_base_url: Option<&str>,
+        anthropic_model_flash: Option<&str>,
+        anthropic_model_pro: Option<&str>,
     ) -> Self {
         let mut snapshot = LlmConfigSnapshot::default();
 
@@ -86,6 +92,8 @@ impl LlmConfigStore {
         {
             snapshot.openai.api_key = Some(key.to_string());
             snapshot.openai.base_url = openai_base_url.map(|s| s.to_string());
+            snapshot.openai.model_flash = openai_model_flash.map(|s| s.to_string());
+            snapshot.openai.model_pro = openai_model_pro.map(|s| s.to_string());
         }
 
         if let Some(key) = anthropic_api_key
@@ -93,6 +101,8 @@ impl LlmConfigStore {
         {
             snapshot.anthropic.api_key = Some(key.to_string());
             snapshot.anthropic.base_url = anthropic_base_url.map(|s| s.to_string());
+            snapshot.anthropic.model_flash = anthropic_model_flash.map(|s| s.to_string());
+            snapshot.anthropic.model_pro = anthropic_model_pro.map(|s| s.to_string());
         }
 
         Self {
@@ -118,8 +128,11 @@ impl LlmConfigStore {
             if let Some(u) = &openai.base_url {
                 config.openai.base_url = Some(u.clone());
             }
-            if let Some(m) = &openai.default_model {
-                config.openai.default_model = Some(m.clone());
+            if let Some(m) = &openai.model_flash {
+                config.openai.model_flash = Some(m.clone());
+            }
+            if let Some(m) = &openai.model_pro {
+                config.openai.model_pro = Some(m.clone());
             }
         }
         if let Some(anthropic) = &update.anthropic {
@@ -129,8 +142,11 @@ impl LlmConfigStore {
             if let Some(u) = &anthropic.base_url {
                 config.anthropic.base_url = Some(u.clone());
             }
-            if let Some(m) = &anthropic.default_model {
-                config.anthropic.default_model = Some(m.clone());
+            if let Some(m) = &anthropic.model_flash {
+                config.anthropic.model_flash = Some(m.clone());
+            }
+            if let Some(m) = &anthropic.model_pro {
+                config.anthropic.model_pro = Some(m.clone());
             }
         }
     }
@@ -151,10 +167,10 @@ impl LlmConfigStore {
                     .openai
                     .base_url
                     .clone()
-                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                    .unwrap_or_else(|| "https://api.openai.com".to_string()),
                 default_model: config
                     .openai
-                    .default_model
+                    .model_flash
                     .clone()
                     .unwrap_or_else(|| "gpt-4o-mini".to_string()),
                 timeout_secs: 60,
@@ -183,7 +199,7 @@ impl LlmConfigStore {
                     .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
                 default_model: config
                     .anthropic
-                    .default_model
+                    .model_flash
                     .clone()
                     .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
                 timeout_secs: 60,
@@ -242,7 +258,8 @@ mod tests {
             openai: Some(ProviderConfig {
                 api_key: Some("sk-test-key".to_string()),
                 base_url: Some("https://custom.api.com/v1".to_string()),
-                default_model: None,
+                model_flash: None,
+                model_pro: None,
             }),
             anthropic: None,
         });
@@ -264,7 +281,8 @@ mod tests {
             openai: Some(ProviderConfig {
                 api_key: Some("sk-old".to_string()),
                 base_url: Some("https://old.api.com".to_string()),
-                default_model: None,
+                model_flash: None,
+                model_pro: None,
             }),
             anthropic: None,
         });
@@ -273,7 +291,8 @@ mod tests {
             openai: Some(ProviderConfig {
                 api_key: Some("sk-new".to_string()),
                 base_url: None,
-                default_model: None,
+                model_flash: None,
+                model_pro: None,
             }),
             anthropic: None,
         });
@@ -294,12 +313,55 @@ mod tests {
             openai: Some(ProviderConfig {
                 api_key: Some("sk-abcdefghij12345".to_string()),
                 base_url: None,
-                default_model: None,
+                model_flash: None,
+                model_pro: None,
             }),
             anthropic: None,
         });
 
         let masked = store.snapshot().with_masked_keys();
         assert_eq!(masked.openai.api_key, Some("sk-a****2345".to_string()));
+    }
+
+    #[test]
+    fn test_model_flash_and_pro_storage() {
+        let store = LlmConfigStore::default();
+        store.update(LlmConfigUpdate {
+            openai: Some(ProviderConfig {
+                api_key: Some("sk-test".to_string()),
+                base_url: None,
+                model_flash: Some("gpt-4o-mini".to_string()),
+                model_pro: Some("o3".to_string()),
+            }),
+            anthropic: None,
+        });
+
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.openai.model_flash, Some("gpt-4o-mini".to_string()));
+        assert_eq!(snapshot.openai.model_pro, Some("o3".to_string()));
+    }
+
+    #[test]
+    fn test_from_env_with_models() {
+        let store = LlmConfigStore::from_env(
+            Some("sk-test"),
+            Some("https://custom.api.com"),
+            Some("gpt-4o-mini"),
+            Some("o3"),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.openai.api_key, Some("sk-test".to_string()));
+        assert_eq!(
+            snapshot.openai.base_url,
+            Some("https://custom.api.com".to_string())
+        );
+        assert_eq!(snapshot.openai.model_flash, Some("gpt-4o-mini".to_string()));
+        assert_eq!(snapshot.openai.model_pro, Some("o3".to_string()));
+        assert!(snapshot.anthropic.api_key.is_none());
     }
 }

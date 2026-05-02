@@ -19,7 +19,7 @@ impl Default for OpenAIConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
-            base_url: "https://api.openai.com/v1".to_string(),
+            base_url: "https://api.openai.com".to_string(),
             default_model: "gpt-4o".to_string(),
             timeout_secs: 60,
         }
@@ -224,7 +224,7 @@ impl LlmProvider for OpenAIProvider {
         }
 
         let body = self.build_request(request);
-        let url = format!("{}/chat/completions", self.config.base_url);
+        let url = format!("{}/v1/chat/completions", self.config.base_url);
 
         // T-03-03: Log request for audit trail
         let request_id = format!("req-{}", chrono::Local::now().timestamp_millis());
