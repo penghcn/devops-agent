@@ -56,15 +56,16 @@ backend/src/
 │   └── gitlab.rs              # GitLab API 封装
 │
 ├── llm/                       # LLM 提供商抽象
-│   ├── mod.rs                 # LlmProvider trait + Message 枚举
-│   ├── router.rs              # ModelRouter 路由
+│   ├── mod.rs                 # LlmProvider trait + Message/ChatRequest 等类型
+│   ├── router.rs              # ModelRouter：L1/L2 任务分类 + provider 路由
 │   ├── structured_output.rs   # Schema 强约束输出
-│   └── provider/              # Provider 实现
-│       ├── mod.rs             # Provider trait
-│       ├── config.rs          # Provider 配置存储
-│       ├── http_client.rs     # HTTP 客户端（共享）
-│       ├── openai.rs          # OpenAI API 实现
-│       └── anthropic.rs       # Anthropic API 实现
+│   └── provider/              # Provider 实现（适配器模式）
+│       ├── mod.rs
+│       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>
+│       ├── config.rs          # ProviderConfig + LlmConfigStore + build_model_router()
+│       ├── http_client.rs     # 共享 HTTP 调用逻辑
+│       ├── openai.rs          # OpenAIAdapter + OpenAIProvider 封装
+│       └── anthropic.rs       # AnthropicAdapter + AnthropicProvider 封装
 │
 ├── agent/                     # 意图识别 + 步骤编排
 │   ├── mod.rs                 # Agent 入口
@@ -92,9 +93,10 @@ backend/src/
 用户请求
   └── api.rs (HTTP 路由层)
         └── process_request_with_store()
-              ├── Provider Config → 自动构建 ModelRouter
-              │     ├── OpenAI Provider (gpt-4o-mini)
-              │     └── Anthropic Provider (claude-sonnet-4)
+              ├── Provider Config → build_model_router() → ModelRouter
+              │     ├── BaseConfig + ProviderAdapter trait + GenericProvider<T>
+              │     ├── OpenAIProvider (GenericProvider<OpenAIAdapter>)
+              │     └── AnthropicProvider (GenericProvider<AnthropicAdapter>)
               │
               ├── IntentRouter → 意图识别
               │     ├── 正则匹配（精确指令）

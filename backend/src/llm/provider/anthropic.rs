@@ -69,7 +69,7 @@ impl ProviderAdapter for AnthropicAdapter {
 
         let mut body = serde_json::json!({
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "messages": messages,
             "temperature": request.temperature.unwrap_or(0.0),
         });

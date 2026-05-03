@@ -178,6 +178,10 @@ impl ModelRouter {
             }
         }
         // Fallback to first provider.
+        tracing::warn!(
+            model = %model,
+            "No provider found for model, falling back to first registered provider"
+        );
         self.providers.first().map(|(_, p, _)| p.clone())
     }
 }

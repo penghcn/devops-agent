@@ -360,3 +360,227 @@ fn test_anthropic_valid_creation() {
     let provider = AnthropicProvider::new(config).unwrap();
     assert_eq!(provider.provider_id(), "anthropic");
 }
+
+// ── Adapter build_request / parse_response Tests ──
+
+use devops_agent::llm::provider::{AnthropicAdapter, OpenAIAdapter, ProviderAdapter};
+
+/// Test: OpenAIAdapter build_request produces correct body
+#[test]
+fn test_openai_build_request() {
+    let adapter = OpenAIAdapter;
+    let req = ChatRequest {
+        model: "gpt-4o".to_string(),
+        messages: vec![
+            Message::System {
+                content: "You are helpful".to_string(),
+            },
+            Message::User {
+                content: "Hello".to_string(),
+            },
+        ],
+        tools: None,
+        temperature: Some(0.5),
+    };
+
+    let body = adapter.build_request(&req, "default-model");
+
+    assert_eq!(body["model"], "gpt-4o");
+    assert_eq!(body["temperature"], 0.5);
+    assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(body["messages"][0]["role"], "system");
+    assert_eq!(body["messages"][1]["role"], "user");
+    assert!(body.get("tools").is_none());
+}
+
+/// Test: OpenAIAdapter build_request with tools
+#[test]
+fn test_openai_build_request_with_tools() {
+    let adapter = OpenAIAdapter;
+    let tools = vec![ToolDefinition {
+        name: "read_file".to_string(),
+        description: "Read a file".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } }
+        }),
+    }];
+
+    let req = ChatRequest {
+        model: String::new(),
+        messages: vec![Message::User {
+            content: "read /tmp/test.txt".to_string(),
+        }],
+        tools: Some(tools),
+        temperature: None,
+    };
+
+    let body = adapter.build_request(&req, "gpt-4o-mini");
+
+    assert_eq!(body["model"], "gpt-4o-mini"); // uses default_model when model is empty
+    let tools_arr = body["tools"].as_array().unwrap();
+    assert_eq!(tools_arr.len(), 1);
+    assert_eq!(tools_arr[0]["type"], "function");
+    assert_eq!(tools_arr[0]["function"]["name"], "read_file");
+}
+
+/// Test: OpenAIAdapter parse_response
+#[test]
+fn test_openai_parse_response() {
+    let adapter = OpenAIAdapter;
+    let raw = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": "Hello there!",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{\"path\": \"/tmp/test.txt\"}"
+                    }
+                }]
+            }
+        }],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 20,
+            "total_tokens": 30
+        }
+    });
+
+    let resp = adapter.parse_response(&raw).unwrap();
+
+    assert_eq!(resp.content, "Hello there!");
+    assert_eq!(resp.tool_calls.len(), 1);
+    assert_eq!(resp.tool_calls[0].id, "call_1");
+    assert_eq!(resp.tool_calls[0].name, "read_file");
+    assert_eq!(resp.usage.prompt_tokens, 10);
+    assert_eq!(resp.usage.completion_tokens, 20);
+    assert_eq!(resp.usage.total_tokens, 30);
+}
+
+/// Test: OpenAIAdapter parse_response with no tool calls
+#[test]
+fn test_openai_parse_response_text_only() {
+    let adapter = OpenAIAdapter;
+    let raw = serde_json::json!({
+        "choices": [{
+            "message": { "content": "Just text" }
+        }],
+        "usage": {
+            "prompt_tokens": 5,
+            "completion_tokens": 10,
+            "total_tokens": 15
+        }
+    });
+
+    let resp = adapter.parse_response(&raw).unwrap();
+
+    assert_eq!(resp.content, "Just text");
+    assert!(resp.tool_calls.is_empty());
+}
+
+/// Test: AnthropicAdapter build_request produces correct body
+#[test]
+fn test_anthropic_build_request() {
+    let adapter = AnthropicAdapter;
+    let req = ChatRequest {
+        model: "claude-sonnet-4".to_string(),
+        messages: vec![
+            Message::System {
+                content: "Be concise".to_string(),
+            },
+            Message::User {
+                content: "What is Rust?".to_string(),
+            },
+        ],
+        tools: None,
+        temperature: Some(0.0),
+    };
+
+    let body = adapter.build_request(&req, "default-model");
+
+    assert_eq!(body["model"], "claude-sonnet-4");
+    assert_eq!(body["max_tokens"], 8192);
+    assert_eq!(body["system"], "Be concise");
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 1); // system is extracted separately
+    assert_eq!(msgs[0]["role"], "user");
+}
+
+/// Test: AnthropicAdapter build_request with tools
+#[test]
+fn test_anthropic_build_request_with_tools() {
+    let adapter = AnthropicAdapter;
+    let tools = vec![ToolDefinition {
+        name: "bash".to_string(),
+        description: "Run shell".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": { "command": { "type": "string" } }
+        }),
+    }];
+
+    let req = ChatRequest {
+        model: String::new(),
+        messages: vec![],
+        tools: Some(tools),
+        temperature: None,
+    };
+
+    let body = adapter.build_request(&req, "claude-sonnet-4");
+
+    assert_eq!(body["model"], "claude-sonnet-4");
+    let tools_arr = body["tools"].as_array().unwrap();
+    assert_eq!(tools_arr.len(), 1);
+    assert_eq!(tools_arr[0]["name"], "bash");
+    assert!(tools_arr[0].get("input_schema").is_some());
+}
+
+/// Test: AnthropicAdapter parse_response
+#[test]
+fn test_anthropic_parse_response() {
+    let adapter = AnthropicAdapter;
+    let raw = serde_json::json!({
+        "content": [
+            {"type": "text", "text": "Rust is great"},
+            {
+                "type": "tool_use",
+                "id": "tool_1",
+                "name": "bash",
+                "input": {"command": "ls"}
+            }
+        ],
+        "usage": {
+            "input_tokens": 20,
+            "output_tokens": 30
+        }
+    });
+
+    let resp = adapter.parse_response(&raw).unwrap();
+
+    assert_eq!(resp.content, "Rust is great");
+    assert_eq!(resp.tool_calls.len(), 1);
+    assert_eq!(resp.tool_calls[0].id, "tool_1");
+    assert_eq!(resp.tool_calls[0].name, "bash");
+    assert_eq!(resp.usage.prompt_tokens, 20);
+    assert_eq!(resp.usage.completion_tokens, 30);
+    assert_eq!(resp.usage.total_tokens, 50);
+}
+
+/// Test: AnthropicAdapter parse_response text only
+#[test]
+fn test_anthropic_parse_response_text_only() {
+    let adapter = AnthropicAdapter;
+    let raw = serde_json::json!({
+        "content": [{"type": "text", "text": "Hello"}],
+        "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+
+    let resp = adapter.parse_response(&raw).unwrap();
+
+    assert_eq!(resp.content, "Hello");
+    assert!(resp.tool_calls.is_empty());
+    assert_eq!(resp.usage.total_tokens, 8);
+}
