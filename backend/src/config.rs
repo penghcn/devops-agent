@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::llm::{load_llm_providers, ProviderConfig};
+use crate::llm::{ProviderConfig, load_llm_providers};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -12,6 +12,10 @@ pub struct Config {
     pub claude_code_path: String,
     pub llm_providers: Vec<ProviderConfig>,
     pub default_provider: String,
+    /// CORS 允许的域名列表，逗号分隔。默认允许 localhost。
+    pub cors_origins: Vec<String>,
+    /// API 访问密钥，用于保护后端接口。为空则不启用认证。
+    pub api_key: Option<String>,
 }
 
 impl Config {
@@ -33,6 +37,10 @@ impl Config {
             llm_providers: load_llm_providers(),
             default_provider: env::var("DEFAULT_PROVIDER")
                 .unwrap_or_else(|_| "anthropic".to_string()),
+            cors_origins: env::var("CORS_ORIGINS")
+                .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_else(|_| vec!["http://localhost:5173".to_string()]),
+            api_key: env::var("API_KEY").ok(),
         }
         .validate_llm()
     }
@@ -72,6 +80,8 @@ impl Config {
                 model_pro: None,
             }],
             default_provider: "openai".to_string(),
+            cors_origins: vec!["http://localhost:5173".to_string()],
+            api_key: None,
         }
     }
 }

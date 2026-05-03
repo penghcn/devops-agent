@@ -35,7 +35,10 @@ pub async fn http_call(
         "Sending LLM request"
     );
 
-    let request_builder = client.post(url).json(body).header("User-Agent", "devops_agent/0.1.0");
+    let request_builder = client
+        .post(url)
+        .json(body)
+        .header("User-Agent", "devops_agent/0.1.0");
     let request_builder = configure(request_builder);
 
     let response = request_builder.send().await.map_err(|e| {
