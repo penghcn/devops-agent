@@ -5,7 +5,8 @@
 
 use std::sync::{Arc, RwLock};
 
-use super::{AnthropicConfig, AnthropicProvider, OpenAIConfig, OpenAIProvider};
+use super::base::{BaseConfig, GenericProvider};
+use super::{AnthropicAdapter, OpenAIAdapter};
 use crate::llm::{LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 
 /// 单-provider 配置
@@ -106,64 +107,50 @@ impl LlmConfigStore {
 
             let flash = pc.model_flash.clone();
 
-            if pc.id == "openai" {
-                let cfg = OpenAIConfig {
-                    api_key: key.clone(),
-                    base_url: pc
-                        .base_url
-                        .clone()
-                        .unwrap_or_else(|| "https://api.openai.com".to_string()),
-                    default_model: flash.clone().unwrap_or_default(),
-                    timeout_secs: 60,
-                };
-                match OpenAIProvider::new(cfg) {
-                    Ok(provider) => {
-                        router.register_provider(
-                            "openai".into(),
-                            Arc::new(provider),
-                            ProviderModels {
-                                model_flash: flash.clone(),
-                                model_pro: pc.model_pro.clone(),
-                                default_model: flash,
-                            },
-                        );
-                        has_any = true;
+            let base_config = BaseConfig {
+                api_key: key.clone(),
+                base_url: pc.base_url.clone().unwrap_or_else(|| {
+                    if pc.id == "openai" {
+                        "https://api.openai.com".to_string()
+                    } else {
+                        "https://api.anthropic.com".to_string()
                     }
+                }),
+                default_model: flash.clone().unwrap_or_default(),
+                timeout_secs: 60,
+            };
+
+            let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
+                match GenericProvider::<OpenAIAdapter>::new(base_config, OpenAIAdapter) {
+                    Ok(p) => Arc::new(p),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to create OpenAI provider");
+                        continue;
                     }
                 }
             } else if pc.id == "anthropic" {
-                let cfg = AnthropicConfig {
-                    api_key: key.clone(),
-                    base_url: pc
-                        .base_url
-                        .clone()
-                        .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
-                    default_model: flash.clone().unwrap_or_default(),
-                    timeout_secs: 60,
-                    max_tokens: 4096,
-                };
-                match AnthropicProvider::new(cfg) {
-                    Ok(provider) => {
-                        router.register_provider(
-                            "anthropic".into(),
-                            Arc::new(provider),
-                            ProviderModels {
-                                model_flash: flash.clone(),
-                                model_pro: pc.model_pro.clone(),
-                                default_model: flash,
-                            },
-                        );
-                        has_any = true;
-                    }
+                match GenericProvider::<AnthropicAdapter>::new(base_config, AnthropicAdapter) {
+                    Ok(p) => Arc::new(p),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to create Anthropic provider");
+                        continue;
                     }
                 }
             } else {
                 tracing::warn!(provider = %pc.id, "Unknown provider, skipping");
-            }
+                continue;
+            };
+
+            router.register_provider(
+                pc.id.clone(),
+                provider,
+                ProviderModels {
+                    model_flash: flash.clone(),
+                    model_pro: pc.model_pro.clone(),
+                    default_model: flash,
+                },
+            );
+            has_any = true;
         }
 
         if has_any {
