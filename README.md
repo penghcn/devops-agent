@@ -8,6 +8,7 @@ backend/src/
 ├── main.rs                    # Axum Web 服务入口
 ├── lib.rs                     # 库入口
 ├── config.rs                  # 配置管理
+├── api.rs                     # HTTP 接口层（路由 + 请求/响应处理）
 │
 ├── harness/                   # 编排框架
 │   ├── mod.rs
@@ -56,11 +57,14 @@ backend/src/
 │
 ├── llm/                       # LLM 提供商抽象
 │   ├── mod.rs                 # LlmProvider trait + Message 枚举
-│   ├── config_store.rs        # LLM 配置存储
-│   ├── openai_provider.rs     # OpenAI API 实现
-│   ├── anthropic_provider.rs  # Anthropic API 实现
 │   ├── router.rs              # ModelRouter 路由
-│   └── structured_output.rs   # Schema 强约束输出
+│   ├── structured_output.rs   # Schema 强约束输出
+│   └── provider/              # Provider 实现
+│       ├── mod.rs             # Provider trait
+│       ├── config.rs          # Provider 配置存储
+│       ├── http_client.rs     # HTTP 客户端（共享）
+│       ├── openai.rs          # OpenAI API 实现
+│       └── anthropic.rs       # Anthropic API 实现
 │
 ├── agent/                     # 意图识别 + 步骤编排
 │   ├── mod.rs                 # Agent 入口
@@ -86,25 +90,26 @@ backend/src/
 
 ```
 用户请求
-  └── process_request_with_store()
-        ├── LlmConfigStore → 自动构建 ModelRouter
-        │     ├── OpenAI Provider (gpt-4o-mini)
-        │     └── Anthropic Provider (claude-sonnet-4)
-        │
-        ├── IntentRouter → 意图识别
-        │     ├── 正则匹配（精确指令）
-        │     ├── LLM 结构化输出（自然语言）
-        │     └── Jenkins 缓存（Job/分支补全）
-        │
-        ├── StepChain → 步骤编排执行
-        │     ├── JobValidate → JenkinsTrigger → JenkinsWait
-        │     └── JenkinsLog → ClaudeAnalyze / ClaudeCode
-        │
-        └── Harness Orchestrator → 编排核心
-              ├── Hook: Token (Token 预算追踪)
-              ├── Hook: Memory (记忆保存)
-              ├── Sandbox (沙箱隔离)
-              └── Tools (工具集)
+  └── api.rs (HTTP 路由层)
+        └── process_request_with_store()
+              ├── Provider Config → 自动构建 ModelRouter
+              │     ├── OpenAI Provider (gpt-4o-mini)
+              │     └── Anthropic Provider (claude-sonnet-4)
+              │
+              ├── IntentRouter → 意图识别
+              │     ├── 正则匹配（精确指令）
+              │     ├── LLM 结构化输出（自然语言）
+              │     └── Jenkins 缓存（Job/分支补全）
+              │
+              ├── StepChain → 步骤编排执行
+              │     ├── JobValidate → JenkinsTrigger → JenkinsWait
+              │     └── JenkinsLog → ClaudeAnalyze / ClaudeCode
+              │
+              └── Harness Orchestrator → 编排核心
+                    ├── Hook: Token (Token 预算追踪)
+                    ├── Hook: Memory (记忆保存)
+                    ├── Sandbox (沙箱隔离)
+                    └── Tools (工具集)
 ```
 
 ### Token 渐进式压缩
