@@ -1,7 +1,34 @@
 //! OpenAI Adapter — implements ProviderAdapter for the OpenAI chat completions API.
 
-use super::base::ProviderAdapter;
-use crate::llm::{ChatRequest, ChatResponse, LlmError, Message, TokenUsage, ToolCall};
+use async_trait::async_trait;
+
+use super::base::{BaseConfig, GenericProvider, ProviderAdapter};
+use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+
+/// OpenAI Provider — 便捷封装 `GenericProvider<OpenAIAdapter>`
+///
+/// `OpenAIProvider::new(config)` 单参数构造，内部自动创建 adapter。
+pub struct OpenAIProvider(GenericProvider<OpenAIAdapter>);
+
+impl OpenAIProvider {
+    pub fn new(config: BaseConfig) -> Result<Self, LlmError> {
+        Ok(Self(GenericProvider::<OpenAIAdapter>::new(
+            config,
+            OpenAIAdapter,
+        )?))
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAIProvider {
+    async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        self.0.llm_call(request).await
+    }
+
+    fn provider_id(&self) -> &str {
+        self.0.provider_id()
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct OpenAIAdapter;

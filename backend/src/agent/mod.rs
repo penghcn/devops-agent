@@ -11,7 +11,7 @@ pub use step::{Step, StepChain, StepContext, StepResult};
 pub mod claude;
 
 use crate::config::Config;
-use crate::llm::provider::{AnthropicAdapter, BaseConfig, GenericProvider, OpenAIAdapter};
+use crate::llm::provider::{AnthropicProvider, BaseConfig, OpenAIProvider};
 use crate::llm::{LlmConfigStore, LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use serde::{Deserialize, Serialize};
@@ -160,7 +160,7 @@ fn build_llm_provider(config: &Config) -> Option<Arc<dyn LlmProvider>> {
         };
 
         let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
-            match GenericProvider::<OpenAIAdapter>::new(base_config, OpenAIAdapter) {
+            match OpenAIProvider::new(base_config) {
                 Ok(p) => Arc::new(p),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to create OpenAI provider");
@@ -168,7 +168,7 @@ fn build_llm_provider(config: &Config) -> Option<Arc<dyn LlmProvider>> {
                 }
             }
         } else if pc.id == "anthropic" {
-            match GenericProvider::<AnthropicAdapter>::new(base_config, AnthropicAdapter) {
+            match AnthropicProvider::new(base_config) {
                 Ok(p) => Arc::new(p),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to create Anthropic provider");

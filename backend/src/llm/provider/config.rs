@@ -5,8 +5,8 @@
 
 use std::sync::{Arc, RwLock};
 
-use super::base::{BaseConfig, GenericProvider};
-use super::{AnthropicAdapter, OpenAIAdapter};
+use super::base::BaseConfig;
+use super::{AnthropicProvider, OpenAIProvider};
 use crate::llm::{LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 
 /// 单-provider 配置
@@ -121,7 +121,7 @@ impl LlmConfigStore {
             };
 
             let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
-                match GenericProvider::<OpenAIAdapter>::new(base_config, OpenAIAdapter) {
+                match OpenAIProvider::new(base_config) {
                     Ok(p) => Arc::new(p),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to create OpenAI provider");
@@ -129,7 +129,7 @@ impl LlmConfigStore {
                     }
                 }
             } else if pc.id == "anthropic" {
-                match GenericProvider::<AnthropicAdapter>::new(base_config, AnthropicAdapter) {
+                match AnthropicProvider::new(base_config) {
                     Ok(p) => Arc::new(p),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to create Anthropic provider");
