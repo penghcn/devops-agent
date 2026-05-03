@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 
-use super::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+use super::http_client::http_call;
+use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
 
 /// Anthropic API configuration.
 #[derive(Debug, Clone)]
@@ -14,6 +15,8 @@ pub struct AnthropicConfig {
     pub base_url: String,
     pub default_model: String,
     pub timeout_secs: u64,
+    /// Maximum tokens in the response (default: 4096).
+    pub max_tokens: u32,
 }
 
 impl Default for AnthropicConfig {
@@ -23,6 +26,7 @@ impl Default for AnthropicConfig {
             base_url: "https://api.anthropic.com".to_string(),
             default_model: "claude-sonnet-4-20250514".to_string(),
             timeout_secs: 60,
+            max_tokens: 4096,
         }
     }
 }
@@ -78,7 +82,7 @@ impl AnthropicProvider {
 
         let mut body = serde_json::json!({
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": self.config.max_tokens,
             "messages": messages,
             "temperature": request.temperature.unwrap_or(0.0),
         });
@@ -222,75 +226,18 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
-    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        if self.config.api_key.is_empty() {
-            return Err(LlmError::MissingApiKey {
-                provider: "anthropic".to_string(),
-            });
-        }
-
+    async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         let body = self.build_request(request);
         let url = format!("{}/v1/messages", self.config.base_url);
+        let api_key = self.config.api_key.clone();
 
-        // T-03-03: Log request for audit trail
-        let request_id = format!("req-{}", chrono::Local::now().timestamp_millis());
-        tracing::info!(
-            request_id = %request_id,
-            model = %request.model,
-            provider = "anthropic",
-            "Sending chat request to Anthropic"
-        );
+        let resp = http_call(&self.client, &url, &body, "anthropic", |b| {
+            b.header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-10-01")
+        })
+        .await?;
 
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.config.api_key)
-            .header("anthropic-version", "2023-10-01")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    LlmError::Timeout
-                } else {
-                    LlmError::ApiError {
-                        status: 0,
-                        body: e.to_string(),
-                    }
-                }
-            })?;
-
-        let status = response.status().as_u16();
-
-        // Read raw body for error handling
-        let raw_body = response.text().await.map_err(|e| LlmError::ParseError {
-            detail: format!("Failed to read response body: {}", e),
-        })?;
-
-        // Parse JSON
-        let raw_json: serde_json::Value =
-            serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
-                detail: format!("Invalid JSON from Anthropic: {}", e),
-            })?;
-
-        // Handle error responses
-        if status >= 400 {
-            return Err(LlmError::ApiError {
-                status,
-                body: raw_body,
-            });
-        }
-
-        // T-03-03: Log successful response
-        tracing::info!(
-            request_id = %request_id,
-            model = %request.model,
-            provider = "anthropic",
-            "Chat request completed successfully"
-        );
-
-        self.parse_response(&raw_json)
+        self.parse_response(&resp.json)
     }
 
     fn provider_id(&self) -> &str {

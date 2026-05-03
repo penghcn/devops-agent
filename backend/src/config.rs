@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::llm::{load_llm_providers, ProviderConfig};
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub jenkins_url: String,
@@ -8,22 +10,13 @@ pub struct Config {
     pub gitlab_url: String,
     pub gitlab_token: String,
     pub claude_code_path: String,
-    pub openai_api_key: Option<String>,
-    pub openai_base_url: Option<String>,
-    pub openai_model_flash: Option<String>,
-    pub openai_model_pro: Option<String>,
-    pub anthropic_api_key: Option<String>,
-    pub anthropic_base_url: Option<String>,
-    pub anthropic_model_flash: Option<String>,
-    pub anthropic_model_pro: Option<String>,
+    pub llm_providers: Vec<ProviderConfig>,
+    pub default_provider: String,
 }
 
 impl Config {
     pub fn from_env() -> Self {
         // 尝试从多个位置加载 .env 文件
-        // 1. 当前工作目录
-        // 2. backend/.env（项目结构）
-        // 3. ../backend/.env（从 frontend 目录运行）
         dotenv::dotenv().ok();
         let _ = dotenv::from_path("backend/.env");
         let _ = dotenv::from_path("../backend/.env");
@@ -37,28 +30,20 @@ impl Config {
             gitlab_url: env::var("GITLAB_URL").unwrap_or_else(|_| "https://gitlab.com".to_string()),
             gitlab_token: env::var("GITLAB_TOKEN").expect("GITLAB_TOKEN not set"),
             claude_code_path: env::var("CLAUDE_CODE_PATH").unwrap_or_else(|_| "claude".to_string()),
-            openai_api_key: env::var("OPENAI_API_KEY").ok(),
-            openai_base_url: env::var("OPENAI_BASE_URL").ok(),
-            openai_model_flash: env::var("OPENAI_MODEL_FLASH").ok(),
-            openai_model_pro: env::var("OPENAI_MODEL_PRO").ok(),
-            anthropic_api_key: env::var("ANTHROPIC_API_KEY")
-                .or_else(|_| env::var("ANTHROPIC_AUTH_TOKEN"))
-                .ok(),
-            anthropic_base_url: env::var("ANTHROPIC_BASE_URL").ok(),
-            anthropic_model_flash: env::var("ANTHROPIC_MODEL_FLASH").ok(),
-            anthropic_model_pro: env::var("ANTHROPIC_MODEL_PRO").ok(),
+            llm_providers: load_llm_providers(),
+            default_provider: env::var("DEFAULT_PROVIDER")
+                .unwrap_or_else(|_| "anthropic".to_string()),
         }
         .validate_llm()
     }
 
     /// Validate that at least one LLM provider is configured.
     fn validate_llm(self) -> Self {
-        let has_openai = self.openai_api_key.as_ref().is_some_and(|k| !k.is_empty());
-        let has_anthropic = self
-            .anthropic_api_key
-            .as_ref()
-            .is_some_and(|k| !k.is_empty());
-        if !has_openai && !has_anthropic {
+        let has_provider = self
+            .llm_providers
+            .iter()
+            .any(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty()));
+        if !has_provider {
             panic!(
                 "At least one LLM provider must be configured. \
                  Set OPENAI_API_KEY or ANTHROPIC_API_KEY (optionally with \
@@ -79,14 +64,14 @@ impl Config {
             gitlab_url: "https://gitlab.com".to_string(),
             gitlab_token: "test-token".to_string(),
             claude_code_path: "claude".to_string(),
-            openai_api_key: Some("test-openai-key".to_string()),
-            openai_base_url: None,
-            openai_model_flash: None,
-            openai_model_pro: None,
-            anthropic_api_key: None,
-            anthropic_base_url: None,
-            anthropic_model_flash: None,
-            anthropic_model_pro: None,
+            llm_providers: vec![ProviderConfig {
+                id: "openai".to_string(),
+                api_key: Some("test-openai-key".to_string()),
+                base_url: None,
+                model_flash: None,
+                model_pro: None,
+            }],
+            default_provider: "openai".to_string(),
         }
     }
 }

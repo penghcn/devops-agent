@@ -74,10 +74,9 @@ fn find_branch_match(user_branch: &str, cached_branches: &[String]) -> (String, 
         .iter()
         .map(|cb| (cb.as_str(), levenshtein_distance(user_branch, cb)))
         .min_by_key(|(_, d)| *d)
+        && dist <= 1
     {
-        if dist <= 1 {
-            return (best.to_string(), true);
-        }
+        return (best.to_string(), true);
     }
 
     // No match — return original

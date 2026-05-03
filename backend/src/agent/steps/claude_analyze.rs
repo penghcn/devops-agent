@@ -55,7 +55,7 @@ impl Step for ClaudeAnalyzeStep {
                 .unwrap_or("gpt-4o-mini")
                 .to_string();
             match provider
-                .chat(&ChatRequest {
+                .llm_call(&ChatRequest {
                     model,
                     messages: vec![Message::User {
                         content: prompt.clone(),

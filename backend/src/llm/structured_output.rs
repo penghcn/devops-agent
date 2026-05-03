@@ -178,7 +178,7 @@ impl StructuredOutput {
             };
 
             // Call provider
-            let response = match self.provider.chat(&request).await {
+            let response = match self.provider.llm_call(&request).await {
                 Ok(r) => r,
                 Err(e) => return Err(StructuredOutputError::LlmError(e)),
             };
@@ -221,7 +221,7 @@ impl StructuredOutput {
         }
 
         // Strategy 2: Try ```json ... ``` code block
-        if let Some(json_str) = Self::extract_json_codeblock(content, Some("json"))
+        if let Some(json_str) = Self::extract_json_codeblock(content)
             && let Ok(result) = serde_json::from_str::<T>(&json_str)
         {
             return Ok(result);
@@ -265,7 +265,7 @@ impl StructuredOutput {
     }
 
     /// Extract content from a ```json ... ``` code block.
-    fn extract_json_codeblock(content: &str, _language: Option<&str>) -> Option<String> {
+    fn extract_json_codeblock(content: &str) -> Option<String> {
         // Match ```json\n...\n```
         let marker = "```json";
         if let Some(start) = content.find(marker) {
@@ -304,22 +304,36 @@ impl StructuredOutput {
     }
 
     /// Extract the outermost { ... } from the content.
+    /// Skips braces inside quoted strings and respects escape sequences.
     fn extract_braces(content: &str) -> Option<String> {
         let start = content.find('{')?;
-        // Find matching closing brace by counting
         let mut depth = 0i32;
         let mut end = None;
+        let mut in_string = false;
+        let mut escaped = false;
+
         for (i, c) in content[start..].char_indices() {
-            match c {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = Some(start + i + 1);
-                        break;
-                    }
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
                 }
-                _ => {}
+            } else {
+                match c {
+                    '"' => in_string = true,
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = Some(start + i + 1);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
         end.map(|e| content[start..e].to_string())

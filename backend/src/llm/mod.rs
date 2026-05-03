@@ -7,16 +7,15 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-pub mod anthropic_provider;
-pub mod config_store;
-pub mod openai_provider;
+pub mod provider;
 pub mod router;
 pub mod structured_output;
 
-pub use anthropic_provider::{AnthropicConfig, AnthropicProvider};
-pub use config_store::{LlmConfigSnapshot, LlmConfigStore, LlmConfigUpdate, ProviderConfig};
-pub use openai_provider::{OpenAIConfig, OpenAIProvider};
-pub use router::{ModelRouter, ModelRouterConfig, TaskLevel};
+pub use provider::{
+    load_llm_providers, AnthropicConfig, AnthropicProvider, LlmConfigSnapshot, LlmConfigStore,
+    OpenAIConfig, OpenAIProvider, ProviderConfig,
+};
+pub use router::{ModelRouter, ModelRouterConfig, ProviderModels, TaskLevel};
 pub use structured_output::{StructuredOutput, StructuredOutputError};
 
 // ── Provider Trait ──
@@ -28,7 +27,7 @@ pub use structured_output::{StructuredOutput, StructuredOutputError};
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Send a chat completion request and return the response.
-    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError>;
+    async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError>;
 
     /// Return a stable identifier for this provider (e.g. "openai", "anthropic").
     fn provider_id(&self) -> &str;
@@ -81,6 +80,13 @@ pub struct ChatResponse {
     pub usage: TokenUsage,
     /// Raw JSON response from the provider (for debugging / introspection).
     pub raw: serde_json::Value,
+}
+
+impl ChatResponse {
+    /// Returns true if the response contains tool calls.
+    pub fn has_tool_calls(&self) -> bool {
+        !self.tool_calls.is_empty()
+    }
 }
 
 /// A tool invocation requested by the model.

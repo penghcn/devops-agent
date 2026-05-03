@@ -2376,9 +2376,9 @@ dependencies = [
 
 [[package]]
 name = "yunli"
-version = "0.1.12"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07e42b26816daf2fb949afafca607fc4419332aad5d184edff76ee27201913dc"
+checksum = "9d42be60e7a69c70ed33dea006184b5517715005146746dcf5b75a44c33b8d64"
 dependencies = [
  "anyhow",
  "base64",

@@ -13,7 +13,7 @@ pub mod claude;
 use crate::config::Config;
 use crate::llm::{
     AnthropicConfig, AnthropicProvider, LlmConfigStore, LlmProvider, ModelRouter,
-    ModelRouterConfig, OpenAIConfig, OpenAIProvider,
+    ModelRouterConfig, OpenAIConfig, OpenAIProvider, ProviderModels,
 };
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use serde::{Deserialize, Serialize};
@@ -67,7 +67,7 @@ pub async fn process_request(
     cache: Arc<JenkinsCacheManager>,
 ) -> AgentResponse {
     let llm_provider: Option<Arc<dyn LlmProvider>> = build_llm_provider(config);
-    let default_model = llm_provider.as_ref().map(|_| "gpt-4o-mini".to_string());
+    let default_model = resolve_default_model(config);
 
     let intent_router = if let Some(ref provider) = llm_provider {
         IntentRouter::with_llm(
@@ -98,7 +98,7 @@ pub async fn process_request_with_store(
     store: &LlmConfigStore,
 ) -> AgentResponse {
     let llm_provider = store.build_router();
-    let default_model = llm_provider.as_ref().map(|_| "gpt-4o-mini".to_string());
+    let default_model = resolve_default_model_from_store(store);
 
     let intent_router = if let Some(ref provider) = llm_provider {
         IntentRouter::with_llm(
@@ -121,63 +121,90 @@ pub async fn process_request_with_store(
         .await
 }
 
-/// Build LLM providers from config. Returns a ModelRouter if multiple providers
-/// are configured, a single provider if only one is available, or None if neither.
+/// Resolve the default model: look up the default_provider's model_flash.
+fn resolve_default_model(config: &Config) -> Option<String> {
+    config
+        .llm_providers
+        .iter()
+        .find(|p| p.id == config.default_provider)
+        .and_then(|p| p.model_flash.clone())
+}
+
+/// Resolve the default model from LlmConfigStore.
+fn resolve_default_model_from_store(store: &LlmConfigStore) -> Option<String> {
+    store.snapshot().default_model_flash()
+}
+
+/// Build LLM providers from config. Iterates over the unified provider list.
 fn build_llm_provider(config: &Config) -> Option<Arc<dyn LlmProvider>> {
     let mut router = ModelRouter::new(ModelRouterConfig::default());
     let mut has_any = false;
 
-    // Build OpenAI provider
-    if let Some(ref key) = config.openai_api_key
-        && !key.is_empty()
-    {
-        let cfg = OpenAIConfig {
-            api_key: key.clone(),
-            base_url: config
-                .openai_base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.openai.com".to_string()),
-            default_model: config
-                .openai_model_flash
-                .clone()
-                .unwrap_or_else(|| "gpt-4o-mini".to_string()),
-            timeout_secs: 60,
-        };
-        match OpenAIProvider::new(cfg) {
-            Ok(provider) => {
-                router.register_provider("openai".into(), Arc::new(provider));
-                has_any = true;
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to create OpenAI provider");
-            }
+    for pc in &config.llm_providers {
+        let Some(ref key) = pc.api_key else { continue };
+        if key.is_empty() {
+            continue;
         }
-    }
 
-    // Build Anthropic provider
-    if let Some(ref key) = config.anthropic_api_key
-        && !key.is_empty()
-    {
-        let cfg = AnthropicConfig {
-            api_key: key.clone(),
-            base_url: config
-                .anthropic_base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
-            default_model: config
-                .anthropic_model_flash
-                .clone()
-                .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
-            timeout_secs: 60,
-        };
-        match AnthropicProvider::new(cfg) {
-            Ok(provider) => {
-                router.register_provider("anthropic".into(), Arc::new(provider));
-                has_any = true;
+        let flash = pc.model_flash.clone();
+
+        if pc.id == "openai" {
+            let cfg = OpenAIConfig {
+                api_key: key.clone(),
+                base_url: pc
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com".to_string()),
+                default_model: flash.clone().unwrap_or_default(),
+                timeout_secs: 60,
+            };
+            match OpenAIProvider::new(cfg) {
+                Ok(provider) => {
+                    router.register_provider(
+                        "openai".into(),
+                        Arc::new(provider),
+                        ProviderModels {
+                            model_flash: flash.clone(),
+                            model_pro: pc.model_pro.clone(),
+                            default_model: flash,
+                        },
+                    );
+                    has_any = true;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to create OpenAI provider");
+                }
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to create Anthropic provider");
+        } else if pc.id == "anthropic" {
+            let cfg = AnthropicConfig {
+                api_key: key.clone(),
+                base_url: pc
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
+                default_model: flash.clone().unwrap_or_default(),
+                timeout_secs: 60,
+                max_tokens: 4096,
+            };
+            match AnthropicProvider::new(cfg) {
+                Ok(provider) => {
+                    router.register_provider(
+                        "anthropic".into(),
+                        Arc::new(provider),
+                        ProviderModels {
+                            model_flash: flash.clone(),
+                            model_pro: pc.model_pro.clone(),
+                            default_model: flash,
+                        },
+                    );
+                    has_any = true;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to create Anthropic provider");
+                }
             }
+        } else {
+            tracing::warn!(provider = %pc.id, "Unknown provider, skipping");
         }
     }
 

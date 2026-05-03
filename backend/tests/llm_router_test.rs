@@ -6,6 +6,7 @@
 //! - Provider routing
 //! - StructuredOutput schema-constrained output with retry
 
+use devops_agent::llm::router::ProviderModels;
 use devops_agent::llm::*;
 use std::sync::Arc;
 
@@ -20,7 +21,7 @@ struct TestProvider {
 
 #[async_trait]
 impl LlmProvider for TestProvider {
-    async fn chat(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+    async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         Ok(ChatResponse {
             content: self.response.clone(),
             tool_calls: vec![],
@@ -51,8 +52,6 @@ fn test_task_level_enum() {
 #[test]
 fn test_model_router_config_defaults() {
     let config = ModelRouterConfig::default();
-    assert_eq!(config.l1_model, "gpt-4o-mini");
-    assert_eq!(config.l2_model, "claude-sonnet-4-20250514");
     assert_eq!(config.default_level, TaskLevel::L1);
     assert_eq!(config.max_tokens_l1, 1024);
     assert_eq!(config.max_tokens_l2, 4096);
@@ -61,15 +60,13 @@ fn test_model_router_config_defaults() {
 #[test]
 fn test_model_router_config_custom() {
     let config = ModelRouterConfig {
-        l1_model: "gpt-3.5-turbo".to_string(),
-        l2_model: "claude-opus-4-20250514".to_string(),
         default_level: TaskLevel::L2,
         max_tokens_l1: 2048,
         max_tokens_l2: 8192,
     };
-    assert_eq!(config.l1_model, "gpt-3.5-turbo");
-    assert_eq!(config.l2_model, "claude-opus-4-20250514");
     assert_eq!(config.default_level, TaskLevel::L2);
+    assert_eq!(config.max_tokens_l1, 2048);
+    assert_eq!(config.max_tokens_l2, 8192);
 }
 
 // ── ModelRouter Tests ──
@@ -77,12 +74,7 @@ fn test_model_router_config_custom() {
 #[test]
 fn test_model_router_new() {
     let config = ModelRouterConfig::default();
-    let router = ModelRouter::new(config);
-    assert_eq!(router.select_model(TaskLevel::L1), "gpt-4o-mini");
-    assert_eq!(
-        router.select_model(TaskLevel::L2),
-        "claude-sonnet-4-20250514"
-    );
+    let _router = ModelRouter::new(config);
 }
 
 #[test]
@@ -92,7 +84,15 @@ fn test_model_router_register_provider() {
         id: "openai".to_string(),
         response: "test".to_string(),
     });
-    router.register_provider("openai".to_string(), provider);
+    router.register_provider(
+        "openai".to_string(),
+        provider,
+        ProviderModels {
+            model_flash: Some("gpt-4o-mini".to_string()),
+            model_pro: None,
+            default_model: Some("gpt-4o-mini".to_string()),
+        },
+    );
 }
 
 // ── classify_task Tests ──
@@ -128,13 +128,20 @@ fn test_classify_complex_keyword_l2() {
     assert_eq!(router.classify_task("find the root cause"), TaskLevel::L2);
 }
 
-// ── select_model Tests ──
+// ── ProviderModels select Tests ──
 
 #[test]
-fn test_select_model_by_level() {
-    let router = ModelRouter::default();
-    assert!(router.select_model(TaskLevel::L1).starts_with("gpt"));
-    assert!(router.select_model(TaskLevel::L2).starts_with("claude"));
+fn test_provider_models_select() {
+    let models = ProviderModels {
+        model_flash: Some("gpt-4o-mini".to_string()),
+        model_pro: Some("claude-sonnet-4-20250514".to_string()),
+        default_model: Some("gpt-4o-mini".to_string()),
+    };
+    assert_eq!(models.select(TaskLevel::L1).unwrap(), "gpt-4o-mini");
+    assert_eq!(
+        models.select(TaskLevel::L2).unwrap(),
+        "claude-sonnet-4-20250514"
+    );
 }
 
 // ── route Tests ──
@@ -146,7 +153,15 @@ async fn test_route_with_provider() {
         id: "openai".to_string(),
         response: "deployed successfully".to_string(),
     });
-    router.register_provider("openai".to_string(), provider);
+    router.register_provider(
+        "openai".to_string(),
+        provider,
+        ProviderModels {
+            model_flash: Some("gpt-4o-mini".to_string()),
+            model_pro: None,
+            default_model: Some("gpt-4o-mini".to_string()),
+        },
+    );
 
     let request = ChatRequest {
         model: String::new(),
@@ -178,10 +193,26 @@ async fn test_route_provider_priority() {
     });
 
     // Register anthropic first, openai second
-    router.register_provider("anthropic".to_string(), p2);
-    router.register_provider("openai".to_string(), p1);
+    router.register_provider(
+        "anthropic".to_string(),
+        p2,
+        ProviderModels {
+            model_flash: None,
+            model_pro: None,
+            default_model: None,
+        },
+    );
+    router.register_provider(
+        "openai".to_string(),
+        p1,
+        ProviderModels {
+            model_flash: Some("gpt-4o-mini".to_string()),
+            model_pro: None,
+            default_model: Some("gpt-4o-mini".to_string()),
+        },
+    );
 
-    // L1 task (gpt-*) should route to openai
+    // L1 task should route to openai (first provider with a model for L1)
     let request = ChatRequest {
         model: String::new(),
         messages: vec![Message::User {
@@ -233,6 +264,66 @@ fn test_structured_output_new() {
     let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
     assert_eq!(so.model, "gpt-4o-mini");
     assert_eq!(so.max_retries, 3);
+}
+
+#[tokio::test]
+async fn test_explicit_model_routes_by_prefix() {
+    let mut router = ModelRouter::default();
+
+    // Register OpenAI first, Anthropic second.
+    let openai: Arc<dyn LlmProvider> = Arc::new(TestProvider {
+        id: "openai".to_string(),
+        response: "from openai".to_string(),
+    });
+    let anthropic: Arc<dyn LlmProvider> = Arc::new(TestProvider {
+        id: "anthropic".to_string(),
+        response: "from anthropic".to_string(),
+    });
+
+    router.register_provider(
+        "openai".to_string(),
+        openai,
+        ProviderModels {
+            model_flash: Some("gpt-4o-mini".to_string()),
+            model_pro: None,
+            default_model: Some("gpt-4o-mini".to_string()),
+        },
+    );
+    router.register_provider(
+        "anthropic".to_string(),
+        anthropic,
+        ProviderModels {
+            model_flash: Some("claude-sonnet-4-20250514".to_string()),
+            model_pro: None,
+            default_model: Some("claude-sonnet-4-20250514".to_string()),
+        },
+    );
+
+    // claude-* model should route to Anthropic, not OpenAI (first provider).
+    let request = ChatRequest {
+        model: "claude-sonnet-4".to_string(),
+        messages: vec![Message::User {
+            content: "test".to_string(),
+        }],
+        tools: None,
+        temperature: None,
+    };
+
+    let resp = router.llm_call(&request).await.unwrap();
+    assert_eq!(resp.content, "from anthropic");
+
+    // gpt-* model should route to OpenAI.
+    let request2 = ChatRequest {
+        model: "gpt-4o".to_string(),
+        messages: vec![Message::User {
+            content: "test".to_string(),
+        }],
+        tools: None,
+        temperature: None,
+    };
+
+    let resp2 = router.llm_call(&request2).await.unwrap();
+    assert_eq!(resp2.content, "from openai");
 }
 
 #[tokio::test]
@@ -320,7 +411,7 @@ async fn test_structured_output_retry_on_failure() {
 
     #[async_trait]
     impl LlmProvider for RetryProvider {
-        async fn chat(
+        async fn llm_call(
             &self,
             _request: &ChatRequest,
         ) -> std::result::Result<ChatResponse, LlmError> {

@@ -4,7 +4,8 @@
 
 use async_trait::async_trait;
 
-use super::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+use super::http_client::http_call;
+use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
 
 /// OpenAI API configuration.
 #[derive(Debug, Clone)]
@@ -216,74 +217,17 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl LlmProvider for OpenAIProvider {
-    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        if self.config.api_key.is_empty() {
-            return Err(LlmError::MissingApiKey {
-                provider: "openai".to_string(),
-            });
-        }
-
+    async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         let body = self.build_request(request);
         let url = format!("{}/v1/chat/completions", self.config.base_url);
+        let auth = format!("Bearer {}", self.config.api_key);
 
-        // T-03-03: Log request for audit trail
-        let request_id = format!("req-{}", chrono::Local::now().timestamp_millis());
-        tracing::info!(
-            request_id = %request_id,
-            model = %request.model,
-            provider = "openai",
-            "Sending chat request to OpenAI"
-        );
+        let resp = http_call(&self.client, &url, &body, "openai", |b| {
+            b.header("Authorization", &auth)
+        })
+        .await?;
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    LlmError::Timeout
-                } else {
-                    LlmError::ApiError {
-                        status: 0,
-                        body: e.to_string(),
-                    }
-                }
-            })?;
-
-        let status = response.status().as_u16();
-
-        // Read raw body for error handling
-        let raw_body = response.text().await.map_err(|e| LlmError::ParseError {
-            detail: format!("Failed to read response body: {}", e),
-        })?;
-
-        // Parse JSON
-        let raw_json: serde_json::Value =
-            serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
-                detail: format!("Invalid JSON from OpenAI: {}", e),
-            })?;
-
-        // Handle error responses
-        if status >= 400 {
-            return Err(LlmError::ApiError {
-                status,
-                body: raw_body,
-            });
-        }
-
-        // T-03-03: Log successful response
-        tracing::info!(
-            request_id = %request_id,
-            model = %request.model,
-            provider = "openai",
-            "Chat request completed successfully"
-        );
-
-        self.parse_response(&raw_json)
+        self.parse_response(&resp.json)
     }
 
     fn provider_id(&self) -> &str {

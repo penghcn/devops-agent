@@ -35,36 +35,18 @@ async fn main() {
 
     // 打印启动配置概览
     let snapshot = llm_config_store.snapshot();
-    let mut providers = Vec::new();
-    if snapshot.openai.api_key.is_some() {
-        let model = snapshot
-            .openai
-            .model_flash
-            .as_deref()
-            .unwrap_or("gpt-4o-mini");
-        let base = snapshot
-            .openai
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.openai.com/v1");
-        providers.push(format!("OpenAI(model={}, base={})", model, base));
-    }
-    if snapshot.anthropic.api_key.is_some() {
-        let model = snapshot
-            .anthropic
-            .model_flash
-            .as_deref()
-            .unwrap_or("claude-sonnet-4-20250514");
-        let base = snapshot
-            .anthropic
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.anthropic.com");
-        providers.push(format!("Anthropic(model={}, base={})", model, base));
+    let mut provider_strs = Vec::new();
+    for pc in &snapshot.providers {
+        if pc.api_key.is_some() {
+            let model = pc.model_flash.as_deref().unwrap_or("(not set)");
+            let base = pc.base_url.as_deref().unwrap_or("(default)");
+            provider_strs.push(format!("{}(model={}, base={})", pc.id, model, base));
+        }
     }
     tracing::info!(
         version = "0.1.0",
-        providers = providers.join(", "),
+        default_provider = %snapshot.default_provider,
+        providers = provider_strs.join(", "),
         "DevOps Agent starting"
     );
 
@@ -106,7 +88,8 @@ async fn main() {
                 tools: None,
                 temperature: Some(0.0),
             };
-            match tokio::time::timeout(std::time::Duration::from_secs(15), router.chat(&req)).await
+            match tokio::time::timeout(std::time::Duration::from_secs(15), router.llm_call(&req))
+                .await
             {
                 Ok(Ok(_)) => {
                     tracing::info!("LLM health check passed");
@@ -166,15 +149,9 @@ async fn main() {
 
 /// 从环境变量初始化 LlmConfigStore
 fn init_llm_config_store(config: &devops_agent::config::Config) -> LlmConfigStore {
-    LlmConfigStore::from_env(
-        config.openai_api_key.as_deref(),
-        config.openai_base_url.as_deref(),
-        config.openai_model_flash.as_deref(),
-        config.openai_model_pro.as_deref(),
-        config.anthropic_api_key.as_deref(),
-        config.anthropic_base_url.as_deref(),
-        config.anthropic_model_flash.as_deref(),
-        config.anthropic_model_pro.as_deref(),
+    LlmConfigStore::from_providers(
+        config.llm_providers.clone(),
+        config.default_provider.clone(),
     )
 }
 

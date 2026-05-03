@@ -1,7 +1,7 @@
 //! LLM Provider trait and data type tests
 //!
 //! Verifies:
-//! - LlmProvider trait has chat() and provider_id() methods
+//! - LlmProvider trait has llm_call() and provider_id() methods
 //! - ChatRequest, ChatResponse, TokenUsage, Message, ToolCall, LlmError types
 //! - Provider implementations compile correctly
 
@@ -228,7 +228,7 @@ struct MockProvider {
 
 #[async_trait]
 impl LlmProvider for MockProvider {
-    async fn chat(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+    async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         Ok(ChatResponse {
             content: "mock response".to_string(),
             tool_calls: vec![],
@@ -260,7 +260,7 @@ async fn test_mock_provider_chat() {
         temperature: None,
     };
 
-    let resp = mock.chat(&req).await.unwrap();
+    let resp = mock.llm_call(&req).await.unwrap();
     assert_eq!(resp.content, "mock response");
 }
 
@@ -280,7 +280,7 @@ async fn test_provider_trait_object() {
         temperature: None,
     };
 
-    let resp = provider.chat(&req).await.unwrap();
+    let resp = provider.llm_call(&req).await.unwrap();
     assert!(!resp.content.is_empty());
 }
 
@@ -291,7 +291,7 @@ async fn test_provider_trait_object() {
 fn test_openai_config_defaults() {
     let config = OpenAIConfig::default();
     assert_eq!(config.api_key, "");
-    assert_eq!(config.base_url, "https://api.openai.com/v1");
+    assert_eq!(config.base_url, "https://api.openai.com");
     assert_eq!(config.default_model, "gpt-4o");
     assert_eq!(config.timeout_secs, 60);
 }
