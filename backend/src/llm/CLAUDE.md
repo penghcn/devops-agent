@@ -1,4 +1,5 @@
 ## 架构
+```
 llm/
   ├── mod.rs
   ├── router.rs                    # 路由逻辑，保持在 llm 层
@@ -9,8 +10,9 @@ llm/
       ├── openai.rs                # OpenAI provider
       ├── config.rs                # 配置加载 + LlmConfigStore
       └── http_client.rs           # 共享 HTTP 调用逻辑
-      
+```     
 ## 设计
+```
 抽出provider mod，所有provider放在里面，比如openai_provider
 高度抽象 model provider，提供对外调用统一的接口，无需关心具体llm provider 实现
 统一对外 
@@ -30,3 +32,5 @@ let provider = providers.0
 let res = provider.chat_request.llm_call(prompt_message)
 let res::chatResponse = provider.chat_response.parse()
 if res.is_tool_call {}
+
+```

@@ -340,6 +340,7 @@ async fn test_structured_output_execute_valid_json() {
     let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
 
     #[derive(serde::Deserialize, Debug)]
+    #[allow(dead_code)]
     struct IntentResult {
         action: String,
         job_name: String,
@@ -366,6 +367,7 @@ async fn test_structured_output_extract_json_codeblock() {
     let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
 
     #[derive(serde::Deserialize, Debug)]
+    #[allow(dead_code)]
     struct BuildResult {
         action: String,
         job_name: String,
@@ -465,6 +467,7 @@ async fn test_structured_output_max_retries_exceeded() {
     let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema).with_max_retries(2);
 
     #[derive(serde::Deserialize, Debug)]
+    #[allow(dead_code)]
     struct ActionResult {
         action: String,
     }

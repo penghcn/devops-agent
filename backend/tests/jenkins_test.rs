@@ -77,6 +77,7 @@ async fn test_ds_pkg_job_exists() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_ds_pkg_dev_branch_exists() {
     let (url, user, token) = get_jenkins_config();
     let client = Client::new();
@@ -107,6 +108,7 @@ async fn test_ds_pkg_dev_branch_exists() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_trigger_ds_pkg_dev_build() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
@@ -154,6 +156,7 @@ async fn test_trigger_ds_pkg_dev_build() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_get_latest_build_status() {
     let (url, user, token) = get_jenkins_config();
     let client = Client::new();

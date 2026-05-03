@@ -8,22 +8,6 @@ fn init_env() {
     dotenv::dotenv().ok();
 }
 
-/// 测试长日志保留完整内容
-#[test]
-fn test_log_not_truncated() {
-    let very_long_log = "x".repeat(10000);
-    // 修复后不再截断，直接返回完整日志
-    let log = very_long_log.clone();
-    assert_eq!(log.len(), 10000);
-}
-
-/// 测试短日志保留完整内容
-#[test]
-fn test_short_log_preserved() {
-    let short_log = "Started\n[Pipeline] deploy to server\nFinished\n";
-    assert_eq!(short_log.len(), 45);
-}
-
 /// 测试 JenkinsLogStep 缺少 job_name 时中止
 #[tokio::test]
 async fn test_jenkins_log_step_missing_job_name() {
@@ -92,6 +76,7 @@ async fn test_jenkins_log_step_missing_build_number() {
 
 /// 集成测试：获取真实 Jenkins 构建日志（需要连接 Jenkins）
 #[tokio::test]
+#[ignore]
 async fn test_get_real_build_log() {
     let config = Config::from_env();
     let build_num = get_latest_build_number("ds-pkg", Some("dev"), &config)
@@ -113,6 +98,7 @@ async fn test_get_real_build_log() {
 
 /// 集成测试：获取构建日志并分析完整性（成功构建场景）
 #[tokio::test]
+#[ignore]
 async fn test_log_analysis_success_build() {
     let config = Config::from_env();
     let build_num = get_latest_build_number("ds-pkg", Some("dev"), &config)

@@ -134,7 +134,7 @@ Agent 执行流程（精简版）：
    - 降级：LLM 不可用时返回降级响应
 
 参考实现：
-- backend/tests/simple_agent_test.rs — run_openai_agent() / run_claude_agent()
+- backend/tests/agent_simple_test.rs — run_openai_agent() / run_claude_agent()
 - Phase 4 集成计划：TokenHook + MemoryHook 串联完整流程
 ```
 ## 部署、测试
@@ -142,6 +142,8 @@ Agent 执行流程（精简版）：
 # 1. 启动 Rust 后端
 cd backend
 ./run-signed.sh
+
+cargo test 需忽略 ignore
 
 # 2. 启动前端（另一个终端）
 cd frontend

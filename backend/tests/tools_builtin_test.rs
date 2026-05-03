@@ -21,7 +21,6 @@ struct TestFixture {
     pub isolator: FileSystemIsolator,
     pub sandbox: ProcessSandbox,
     pub policy_engine: PolicyEngine,
-    pub audit_log: AuditLog,
     pub network_whitelist: NetworkWhitelist,
     #[allow(dead_code)]
     pub tmp: TempDir, // 保持引用，防止目录被清理
@@ -51,7 +50,7 @@ impl TestFixture {
 
         let sandbox = ProcessSandbox::new();
         let audit_log = AuditLog::new();
-        let policy_engine = PolicyEngine::new(Arc::new(audit_log.clone()));
+        let policy_engine = PolicyEngine::new(Arc::new(audit_log));
         let network_whitelist = NetworkWhitelist::new();
 
         Self {
@@ -61,7 +60,6 @@ impl TestFixture {
             isolator,
             sandbox,
             policy_engine,
-            audit_log,
             network_whitelist,
             tmp,
         }
@@ -434,11 +432,6 @@ mod git_tool_tests {
 }
 
 // ============ 辅助验证测试 ============
-
-#[test]
-fn test_tool_trait_exists() {
-    assert!(true);
-}
 
 #[test]
 fn test_tool_input_structure() {

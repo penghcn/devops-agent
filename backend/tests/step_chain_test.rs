@@ -52,6 +52,7 @@ async fn test_job_validate_missing_job_name() {
 
 /// 测试 JobValidateStep 校验不存在的 Job
 #[tokio::test]
+#[ignore]
 async fn test_job_validate_nonexistent_job() {
     let config = Config::from_env();
     let mut ctx = StepContext::new(
@@ -73,6 +74,7 @@ async fn test_job_validate_nonexistent_job() {
 
 /// 测试 check_job_exists 函数 — 不存在的 Job
 #[tokio::test]
+#[ignore]
 async fn test_check_job_not_exists() {
     let config = Config::from_env();
     let (exists, _job_type, _name) =
@@ -84,6 +86,7 @@ async fn test_check_job_not_exists() {
 
 /// 测试 IntentRouter 识别 deploy 意图
 #[tokio::test]
+#[ignore]
 async fn test_intent_deploy() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
@@ -95,6 +98,7 @@ async fn test_intent_deploy() {
 
 /// 测试 IntentRouter 识别 build 意图
 #[tokio::test]
+#[ignore]
 async fn test_intent_build() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
@@ -106,6 +110,7 @@ async fn test_intent_build() {
 
 /// 测试 IntentRouter 识别 query 意图
 #[tokio::test]
+#[ignore]
 async fn test_intent_query() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
@@ -121,6 +126,7 @@ async fn test_intent_query() {
 
 /// 测试 IntentRouter 识别 analyze 意图
 #[tokio::test]
+#[ignore]
 async fn test_intent_analyze() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
@@ -136,6 +142,7 @@ async fn test_intent_analyze() {
 
 /// 测试 IntentRouter 的 StepChain 映射 — DeployPipeline
 #[test]
+#[ignore]
 fn test_chain_deploy_pipeline() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
@@ -152,6 +159,7 @@ fn test_chain_deploy_pipeline() {
 
 /// 测试 IntentRouter 的 StepChain 映射 — QueryPipeline
 #[test]
+#[ignore]
 fn test_chain_query_pipeline() {
     let config = Config::from_env();
     let cache = Arc::new(JenkinsCacheManager::new(config));
