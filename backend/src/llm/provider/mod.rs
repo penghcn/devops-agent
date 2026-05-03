@@ -7,5 +7,5 @@ pub mod http_client;
 pub mod openai;
 pub use anthropic::{AnthropicAdapter, AnthropicProvider};
 pub use base::{BaseConfig, GenericProvider, ProviderAdapter};
-pub use config::{LlmConfigSnapshot, LlmConfigStore, ProviderConfig};
+pub use config::{LlmConfigSnapshot, LlmConfigStore, ProviderConfig, build_model_router};
 pub use openai::{OpenAIAdapter, OpenAIProvider};

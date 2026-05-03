@@ -6,7 +6,6 @@
 //! - Provider implementations compile correctly
 
 use devops_agent::llm::*;
-use devops_agent::llm::provider::{AnthropicAdapter, BaseConfig, GenericProvider, OpenAIAdapter};
 
 // ── Type Structure Tests ──
 
@@ -285,18 +284,18 @@ async fn test_provider_trait_object() {
     assert!(!resp.content.is_empty());
 }
 
-// ── GenericProvider Tests (OpenAI Adapter) ──
+// ── OpenAI Provider Tests ──
 
-/// Test: GenericProvider<OpenAIAdapter> rejects empty api_key
+/// Test: OpenAIProvider::new() rejects empty api_key
 #[test]
 fn test_openai_missing_api_key() {
-    let config = BaseConfig {
+    let config = provider::BaseConfig {
         api_key: String::new(),
         base_url: "https://api.openai.com".to_string(),
         default_model: "gpt-4o".to_string(),
         timeout_secs: 60,
     };
-    let result = GenericProvider::<OpenAIAdapter>::new(config, OpenAIAdapter);
+    let result = OpenAIProvider::new(config);
     assert!(result.is_err());
     match result.unwrap_err() {
         LlmError::MissingApiKey { provider } => assert_eq!(provider, "openai"),
@@ -304,44 +303,44 @@ fn test_openai_missing_api_key() {
     }
 }
 
-/// Test: GenericProvider<OpenAIAdapter> accepts valid api_key
+/// Test: OpenAIProvider::new() accepts valid api_key
 #[test]
 fn test_openai_valid_creation() {
-    let config = BaseConfig {
+    let config = provider::BaseConfig {
         api_key: "sk-test".to_string(),
         base_url: "https://api.openai.com".to_string(),
         default_model: "gpt-4o".to_string(),
         timeout_secs: 60,
     };
-    let provider = GenericProvider::<OpenAIAdapter>::new(config, OpenAIAdapter).unwrap();
+    let provider = OpenAIProvider::new(config).unwrap();
     assert_eq!(provider.provider_id(), "openai");
 }
 
-/// Test: GenericProvider<OpenAIAdapter> with custom base_url
+/// Test: OpenAIProvider with custom base_url
 #[test]
 fn test_openai_custom_base_url() {
-    let config = BaseConfig {
+    let config = provider::BaseConfig {
         api_key: "sk-test".to_string(),
         base_url: "https://custom.api.com/v1".to_string(),
         default_model: "gpt-4o".to_string(),
         timeout_secs: 60,
     };
-    let provider = GenericProvider::<OpenAIAdapter>::new(config, OpenAIAdapter).unwrap();
+    let provider = OpenAIProvider::new(config).unwrap();
     assert_eq!(provider.provider_id(), "openai");
 }
 
-// ── GenericProvider Tests (Anthropic Adapter) ──
+// ── Anthropic Provider Tests ──
 
-/// Test: GenericProvider<AnthropicAdapter> rejects empty api_key
+/// Test: AnthropicProvider::new() rejects empty api_key
 #[test]
 fn test_anthropic_missing_api_key() {
-    let config = BaseConfig {
+    let config = provider::BaseConfig {
         api_key: String::new(),
         base_url: "https://api.anthropic.com".to_string(),
         default_model: "claude-sonnet-4-20250514".to_string(),
         timeout_secs: 60,
     };
-    let result = GenericProvider::<AnthropicAdapter>::new(config, AnthropicAdapter);
+    let result = AnthropicProvider::new(config);
     assert!(result.is_err());
     match result.unwrap_err() {
         LlmError::MissingApiKey { provider } => assert_eq!(provider, "anthropic"),
@@ -349,15 +348,15 @@ fn test_anthropic_missing_api_key() {
     }
 }
 
-/// Test: GenericProvider<AnthropicAdapter> accepts valid api_key
+/// Test: AnthropicProvider::new() accepts valid api_key
 #[test]
 fn test_anthropic_valid_creation() {
-    let config = BaseConfig {
+    let config = provider::BaseConfig {
         api_key: "sk-ant-test".to_string(),
         base_url: "https://api.anthropic.com".to_string(),
         default_model: "claude-sonnet-4-20250514".to_string(),
         timeout_secs: 60,
     };
-    let provider = GenericProvider::<AnthropicAdapter>::new(config, AnthropicAdapter).unwrap();
+    let provider = AnthropicProvider::new(config).unwrap();
     assert_eq!(provider.provider_id(), "anthropic");
 }

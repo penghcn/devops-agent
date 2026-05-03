@@ -11,8 +11,8 @@ pub use step::{Step, StepChain, StepContext, StepResult};
 pub mod claude;
 
 use crate::config::Config;
-use crate::llm::provider::{AnthropicProvider, BaseConfig, OpenAIProvider};
-use crate::llm::{LlmConfigStore, LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
+use crate::llm::provider::build_model_router;
+use crate::llm::{LlmConfigStore, LlmProvider};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -64,7 +64,8 @@ pub async fn process_request(
     config: &Config,
     cache: Arc<JenkinsCacheManager>,
 ) -> AgentResponse {
-    let llm_provider: Option<Arc<dyn LlmProvider>> = build_llm_provider(config);
+    let llm_provider: Option<Arc<dyn LlmProvider>> =
+        build_model_router(&config.llm_providers, &config.default_provider);
     let default_model = resolve_default_model(config);
 
     let intent_router = if let Some(ref provider) = llm_provider {
@@ -131,71 +132,4 @@ fn resolve_default_model(config: &Config) -> Option<String> {
 /// Resolve the default model from LlmConfigStore.
 fn resolve_default_model_from_store(store: &LlmConfigStore) -> Option<String> {
     store.snapshot().default_model_flash()
-}
-
-/// Build LLM providers from config. Iterates over the unified provider list.
-fn build_llm_provider(config: &Config) -> Option<Arc<dyn LlmProvider>> {
-    let mut router = ModelRouter::new(ModelRouterConfig::default());
-    let mut has_any = false;
-
-    for pc in &config.llm_providers {
-        let Some(ref key) = pc.api_key else { continue };
-        if key.is_empty() {
-            continue;
-        }
-
-        let flash = pc.model_flash.clone();
-
-        let base_config = BaseConfig {
-            api_key: key.clone(),
-            base_url: pc.base_url.clone().unwrap_or_else(|| {
-                if pc.id == "openai" {
-                    "https://api.openai.com".to_string()
-                } else {
-                    "https://api.anthropic.com".to_string()
-                }
-            }),
-            default_model: flash.clone().unwrap_or_default(),
-            timeout_secs: 60,
-        };
-
-        let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
-            match OpenAIProvider::new(base_config) {
-                Ok(p) => Arc::new(p),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to create OpenAI provider");
-                    continue;
-                }
-            }
-        } else if pc.id == "anthropic" {
-            match AnthropicProvider::new(base_config) {
-                Ok(p) => Arc::new(p),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to create Anthropic provider");
-                    continue;
-                }
-            }
-        } else {
-            tracing::warn!(provider = %pc.id, "Unknown provider, skipping");
-            continue;
-        };
-
-        router.register_provider(
-            pc.id.clone(),
-            provider,
-            ProviderModels {
-                model_flash: flash.clone(),
-                model_pro: pc.model_pro.clone(),
-                default_model: flash,
-            },
-        );
-        has_any = true;
-    }
-
-    if has_any {
-        Some(Arc::new(router))
-    } else {
-        tracing::error!("No LLM provider configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.");
-        None
-    }
 }

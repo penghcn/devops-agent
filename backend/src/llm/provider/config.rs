@@ -1,6 +1,6 @@
 //! LLM Config Store — LLM 配置存储。
 //!
-//! 从 config.toml 加载 provider 配置（由 app_config 模块提供）。
+//! 从 config.toml 加载 provider 配置。
 //! 配置不可运行时修改（只读），前端仅可查看脱敏后的配置。
 
 use std::sync::{Arc, RwLock};
@@ -83,81 +83,102 @@ impl LlmConfigStore {
 
     /// 根据当前配置重建 ModelRouter
     pub fn build_router(&self) -> Option<Arc<dyn LlmProvider>> {
-        // Clone config data first, release lock before expensive provider construction
         let snapshot = self.inner.read().unwrap().clone();
-        let default_provider = snapshot.default_provider.clone();
-        let providers = snapshot.providers;
+        build_model_router(&snapshot.providers, &snapshot.default_provider)
+    }
+}
 
-        // 把 default_provider 排到最前面注册，确保优先路由
-        let mut sorted_providers = providers;
-        sorted_providers.sort_by(|a, b| {
-            let a_is_default = a.id == default_provider;
-            let b_is_default = b.id == default_provider;
-            b_is_default.cmp(&a_is_default)
-        });
+/// 共享的 ModelRouter 构建逻辑（config.rs 和 agent/mod.rs 共用）
+pub fn build_model_router(
+    providers: &[ProviderConfig],
+    default_provider: &str,
+) -> Option<Arc<dyn LlmProvider>> {
+    // 把 default_provider 排到最前面注册，确保优先路由
+    let mut sorted = providers.to_vec();
+    sorted.sort_by(|a, b| {
+        let a_is_default = a.id == default_provider;
+        let b_is_default = b.id == default_provider;
+        b_is_default.cmp(&a_is_default)
+    });
 
-        let mut router = ModelRouter::new(ModelRouterConfig::default());
-        let mut has_any = false;
+    let mut router = ModelRouter::new(ModelRouterConfig::default());
+    let mut has_any = false;
 
-        for pc in &sorted_providers {
-            let Some(ref key) = pc.api_key else { continue };
-            if key.is_empty() {
-                continue;
-            }
+    for pc in &sorted {
+        let Some(ref key) = pc.api_key else { continue };
+        if key.is_empty() {
+            continue;
+        }
 
-            let flash = pc.model_flash.clone();
-
-            let base_config = BaseConfig {
-                api_key: key.clone(),
-                base_url: pc.base_url.clone().unwrap_or_else(|| {
-                    if pc.id == "openai" {
-                        "https://api.openai.com".to_string()
-                    } else {
-                        "https://api.anthropic.com".to_string()
-                    }
-                }),
-                default_model: flash.clone().unwrap_or_default(),
-                timeout_secs: 60,
-            };
-
-            let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
-                match OpenAIProvider::new(base_config) {
-                    Ok(p) => Arc::new(p),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to create OpenAI provider");
-                        continue;
-                    }
-                }
-            } else if pc.id == "anthropic" {
-                match AnthropicProvider::new(base_config) {
-                    Ok(p) => Arc::new(p),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to create Anthropic provider");
-                        continue;
-                    }
-                }
-            } else {
-                tracing::warn!(provider = %pc.id, "Unknown provider, skipping");
-                continue;
-            };
-
-            router.register_provider(
-                pc.id.clone(),
-                provider,
-                ProviderModels {
-                    model_flash: flash.clone(),
-                    model_pro: pc.model_pro.clone(),
-                    default_model: flash,
-                },
+        let base_url = pc.base_url.clone().ok_or_else(|| {
+            tracing::warn!(
+                provider = %pc.id,
+                "Skipping provider: base_url is required but not configured"
             );
-            has_any = true;
-        }
+        });
+        let base_url = match base_url {
+            Ok(url) => url,
+            Err(_) => continue,
+        };
 
-        if has_any {
-            Some(Arc::new(router))
+        let flash = pc.model_flash.clone();
+
+        let base_config = BaseConfig {
+            api_key: key.clone(),
+            base_url,
+            default_model: flash.clone().unwrap_or_default(),
+            timeout_secs: 60,
+        };
+
+        let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
+            match OpenAIProvider::new(base_config) {
+                Ok(p) => Arc::new(p),
+                Err(e) => {
+                    tracing::warn!(
+                        provider = %pc.id,
+                        error = %e,
+                        "Failed to create OpenAI provider"
+                    );
+                    continue;
+                }
+            }
+        } else if pc.id == "anthropic" {
+            match AnthropicProvider::new(base_config) {
+                Ok(p) => Arc::new(p),
+                Err(e) => {
+                    tracing::warn!(
+                        provider = %pc.id,
+                        error = %e,
+                        "Failed to create Anthropic provider"
+                    );
+                    continue;
+                }
+            }
         } else {
-            None
-        }
+            tracing::warn!(
+                provider = %pc.id,
+                "Unknown provider, skipping"
+            );
+            continue;
+        };
+
+        router.register_provider(
+            pc.id.clone(),
+            provider,
+            ProviderModels {
+                model_flash: flash.clone(),
+                model_pro: pc.model_pro.clone(),
+                default_model: flash,
+            },
+        );
+        has_any = true;
+    }
+
+    if has_any {
+        Some(Arc::new(router))
+    } else {
+        tracing::error!("No LLM provider configured. Check api_key and base_url in config.");
+        None
     }
 }
 
@@ -203,7 +224,7 @@ mod tests {
                 ProviderConfig {
                     id: "anthropic".to_string(),
                     api_key: Some("sk-ant-test".to_string()),
-                    base_url: None,
+                    base_url: Some("https://api.anthropic.com".to_string()),
                     model_flash: Some("Qwen3.6".to_string()),
                     model_pro: None,
                 },
@@ -223,7 +244,7 @@ mod tests {
             providers: vec![ProviderConfig {
                 id: "openai".to_string(),
                 api_key: Some("sk-abcdefghij12345".to_string()),
-                base_url: None,
+                base_url: Some("https://api.openai.com".to_string()),
                 model_flash: None,
                 model_pro: None,
             }],
