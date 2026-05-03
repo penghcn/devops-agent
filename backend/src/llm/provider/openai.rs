@@ -8,6 +8,7 @@ use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, Toke
 /// OpenAI Provider — 便捷封装 `GenericProvider<OpenAIAdapter>`
 ///
 /// `OpenAIProvider::new(config)` 单参数构造，内部自动创建 adapter。
+#[derive(Debug)]
 pub struct OpenAIProvider(GenericProvider<OpenAIAdapter>);
 
 impl OpenAIProvider {
@@ -39,11 +40,11 @@ impl ProviderAdapter for OpenAIAdapter {
     }
 
     fn endpoint(&self, base: &str) -> String {
-        format!("{}/v1/chat/completions", base)
+        format!("{base}/v1/chat/completions")
     }
 
     fn headers(&self, api_key: &str, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        builder.header("Authorization", format!("Bearer {}", api_key))
+        builder.header("Authorization", format!("Bearer {api_key}"))
     }
 
     fn build_request(&self, request: &ChatRequest, default_model: &str) -> serde_json::Value {

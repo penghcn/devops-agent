@@ -11,8 +11,12 @@ llm/
       ├── config.rs                # 配置加载 + LlmConfigStore
       └── http_client.rs           # 共享 HTTP 调用逻辑
 ```     
-## 设计
+## 分层
+- BaseConfig：provider 运行配置（api_key, base_url, default_model, timeout）
+- ProviderModels：路由元数据（model_flash, model_pro, default_model）
 ```
+Router 通过 ProviderModels.select(TaskLevel) 决定用哪个 model，再传给 provider 的 ChatRequest
+
 抽出provider mod，所有provider放在里面，比如openai_provider
 高度抽象 model provider，提供对外调用统一的接口，无需关心具体llm provider 实现
 统一对外 
@@ -22,15 +26,20 @@ api_key, //sk-kkkgk****llll
 model(model_default), //默认model_flash，若无则model_pro, 若无则空
 model_flash, //qwen3.6, sonnet4.5
 model_pro, //deekseek v4 pro, opus4.6
-chat_request //llm call抽象chatRequest，注册openai,anthropic等的具体实现类
-chat_response //llm 解析抽象chatResponse，注册openai,anthropic等的具体实现类
+
+chat_request //build_request抽象chatRequest，注册openai,anthropic等的具体实现类
+chat_response //parse_response抽象chatResponse，注册openai,anthropic等的具体实现类
 
 获取配置后，组成 provider vec，并健康校验首个
 
 使用时，参考
-let provider = providers.0
-let res = provider.chat_request.llm_call(prompt_message)
-let res::chatResponse = provider.chat_response.parse()
-if res.is_tool_call {}
+let resp = router.llm_call(&request).await.unwrap();
+
+实际内部执行
+let provider,router_model = router::ProviderModels.select
+let request = provider.build_request(chat_request, router_model)
+let res = provider.llm_call(request)
+let resp:chatResponse = provider.parse_response(res)
+if resp.has_tool_calls {}
 
 ```

@@ -10,12 +10,23 @@ use super::http_client::http_call;
 use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider};
 
 /// 公共 LLM 配置
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BaseConfig {
     pub api_key: String,
     pub base_url: String,
     pub default_model: String,
     pub timeout_secs: u64,
+}
+
+impl std::fmt::Debug for BaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BaseConfig")
+            .field("api_key", &"****")
+            .field("base_url", &self.base_url)
+            .field("default_model", &self.default_model)
+            .field("timeout_secs", &self.timeout_secs)
+            .finish()
+    }
 }
 
 /// 各 Provider 的 API 格式适配 trait
@@ -49,14 +60,20 @@ impl<T: ProviderAdapter> GenericProvider<T> {
                 detail: format!("Failed to build HTTP client: {}", e),
             })?;
 
-        Ok(Self { config, client, adapter })
+        Ok(Self {
+            config,
+            client,
+            adapter,
+        })
     }
 }
 
 #[async_trait]
 impl<T: ProviderAdapter> LlmProvider for GenericProvider<T> {
     async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        let body = self.adapter.build_request(request, &self.config.default_model);
+        let body = self
+            .adapter
+            .build_request(request, &self.config.default_model);
         let url = self.adapter.endpoint(&self.config.base_url);
         let api_key = self.config.api_key.clone();
 

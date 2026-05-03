@@ -8,6 +8,7 @@ use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, Toke
 /// Anthropic Provider — 便捷封装 `GenericProvider<AnthropicAdapter>`
 ///
 /// `AnthropicProvider::new(config)` 单参数构造，内部自动创建 adapter。
+#[derive(Debug)]
 pub struct AnthropicProvider(GenericProvider<AnthropicAdapter>);
 
 impl AnthropicProvider {
@@ -39,7 +40,7 @@ impl ProviderAdapter for AnthropicAdapter {
     }
 
     fn endpoint(&self, base: &str) -> String {
-        format!("{}/v1/messages", base)
+        format!("{base}/v1/messages")
     }
 
     fn headers(&self, api_key: &str, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
