@@ -1,6 +1,6 @@
 use devops_agent::agent::chain_mapping::to_chain_with_prompt;
 use devops_agent::agent::{Intent, IntentRouter, Step, StepContext, StepResult, TaskType};
-use devops_agent::app_config::Config;
+use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;

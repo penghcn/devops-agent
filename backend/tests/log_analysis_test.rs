@@ -1,5 +1,5 @@
 use devops_agent::agent::{Step, StepContext, StepResult};
-use devops_agent::app_config::Config;
+use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
 use std::sync::Arc;
 

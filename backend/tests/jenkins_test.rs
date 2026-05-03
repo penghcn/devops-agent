@@ -1,5 +1,5 @@
 use base64::Engine;
-use devops_agent::app_config::Config;
+use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
 use reqwest::Client;
 use std::env;

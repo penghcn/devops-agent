@@ -3,7 +3,7 @@ use crate::agent::intent::{
     Intent, JobType, extract_fields, intent_from_value, replace_intent_fields,
 };
 use crate::agent::{AgentResponse, StepContext, TaskType};
-use crate::app_config::Config;
+use crate::config::Config;
 use crate::llm::{LlmProvider, StructuredOutput};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;

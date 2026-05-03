@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::app_config::Config;
+use crate::config::Config;
 use crate::tools::jenkins::JobTypeInfo;
 use base64::Engine;
 

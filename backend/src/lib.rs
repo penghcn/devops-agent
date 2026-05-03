@@ -1,6 +1,6 @@
 pub mod agent;
 pub mod api;
-pub mod app_config;
+pub mod config;
 pub mod harness;
 pub mod llm;
 pub mod memory;

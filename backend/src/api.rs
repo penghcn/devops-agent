@@ -9,7 +9,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::agent::{AgentRequest, AgentResponse};
-use crate::app_config::Config;
+use crate::config::Config;
 use crate::llm::LlmConfigStore;
 use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 

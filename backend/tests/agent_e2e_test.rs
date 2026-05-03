@@ -1,5 +1,5 @@
 use devops_agent::agent::{AgentRequest, TaskType};
-use devops_agent::app_config::Config;
+use devops_agent::config::Config;
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 

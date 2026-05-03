@@ -10,7 +10,7 @@ pub use step::{Step, StepChain, StepContext, StepResult};
 
 pub mod claude;
 
-use crate::app_config::Config;
+use crate::config::Config;
 use crate::llm::{
     AnthropicConfig, AnthropicProvider, LlmConfigStore, LlmProvider, ModelRouter,
     ModelRouterConfig, OpenAIConfig, OpenAIProvider, ProviderModels,

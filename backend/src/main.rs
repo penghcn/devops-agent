@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use devops_agent::api::AppState;
-use devops_agent::app_config::Config;
+use devops_agent::config::Config;
 use devops_agent::llm::{ChatRequest, LlmConfigStore, Message};
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 
