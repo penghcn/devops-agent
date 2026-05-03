@@ -1,64 +1,27 @@
-//! OpenAI Provider — implements `LlmProvider` using the OpenAI chat completions API.
-//!
-//! Supports function calling (tool use), structured output, and streaming responses.
+//! OpenAI Adapter — implements ProviderAdapter for the OpenAI chat completions API.
 
-use async_trait::async_trait;
+use super::base::ProviderAdapter;
+use crate::llm::{ChatRequest, ChatResponse, LlmError, Message, TokenUsage, ToolCall};
 
-use super::http_client::http_call;
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+#[derive(Debug, Default)]
+pub struct OpenAIAdapter;
 
-/// OpenAI API configuration.
-#[derive(Debug, Clone)]
-pub struct OpenAIConfig {
-    pub api_key: String,
-    pub base_url: String,
-    pub default_model: String,
-    pub timeout_secs: u64,
-}
-
-impl Default for OpenAIConfig {
-    fn default() -> Self {
-        Self {
-            api_key: String::new(),
-            base_url: "https://api.openai.com".to_string(),
-            default_model: "gpt-4o".to_string(),
-            timeout_secs: 60,
-        }
-    }
-}
-
-/// OpenAI chat completions API client.
-#[derive(Debug)]
-pub struct OpenAIProvider {
-    config: OpenAIConfig,
-    client: reqwest::Client,
-}
-
-impl OpenAIProvider {
-    /// Create a new OpenAI provider.
-    ///
-    /// Returns `LlmError::MissingApiKey` if the api_key is empty.
-    pub fn new(config: OpenAIConfig) -> Result<Self, LlmError> {
-        if config.api_key.is_empty() {
-            return Err(LlmError::MissingApiKey {
-                provider: "openai".to_string(),
-            });
-        }
-
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .map_err(|e| LlmError::ParseError {
-                detail: format!("Failed to build HTTP client: {}", e),
-            })?;
-
-        Ok(Self { config, client })
+impl ProviderAdapter for OpenAIAdapter {
+    fn id(&self) -> &str {
+        "openai"
     }
 
-    /// Build the OpenAI API request body from a unified `ChatRequest`.
-    fn build_request(&self, request: &ChatRequest) -> serde_json::Value {
+    fn endpoint(&self, base: &str) -> String {
+        format!("{}/v1/chat/completions", base)
+    }
+
+    fn headers(&self, api_key: &str, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        builder.header("Authorization", format!("Bearer {}", api_key))
+    }
+
+    fn build_request(&self, request: &ChatRequest, default_model: &str) -> serde_json::Value {
         let model = if request.model.is_empty() {
-            &self.config.default_model
+            default_model
         } else {
             &request.model
         };
@@ -75,7 +38,6 @@ impl OpenAIProvider {
             "temperature": request.temperature.unwrap_or(0.0),
         });
 
-        // Add tools if present (OpenAI function calling format)
         if let Some(ref tools) = request.tools {
             let openai_tools: Vec<serde_json::Value> = tools
                 .iter()
@@ -96,59 +58,7 @@ impl OpenAIProvider {
         body
     }
 
-    /// Convert a unified `Message` to OpenAI format.
-    /// Returns `None` for empty assistant messages with no tool calls.
-    fn message_to_openai(&self, msg: &Message) -> Option<serde_json::Value> {
-        match msg {
-            Message::System { content } => Some(serde_json::json!({
-                "role": "system",
-                "content": content,
-            })),
-            Message::User { content } => Some(serde_json::json!({
-                "role": "user",
-                "content": content,
-            })),
-            Message::Assistant {
-                content,
-                tool_calls,
-            } => {
-                if content.is_empty() && tool_calls.is_empty() {
-                    return None;
-                }
-
-                let mut msg_obj = serde_json::json!({
-                    "role": "assistant",
-                });
-
-                if !content.is_empty() {
-                    msg_obj["content"] = serde_json::json!(content);
-                }
-
-                if !tool_calls.is_empty() {
-                    let calls: Vec<serde_json::Value> = tool_calls
-                        .iter()
-                        .map(|tc| {
-                            serde_json::json!({
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": tc.arguments.to_string(),
-                                }
-                            })
-                        })
-                        .collect();
-                    msg_obj["tool_calls"] = serde_json::json!(calls);
-                }
-
-                Some(msg_obj)
-            }
-        }
-    }
-
-    /// Parse the OpenAI API response into a unified `ChatResponse`.
     fn parse_response(&self, raw: &serde_json::Value) -> Result<ChatResponse, LlmError> {
-        // Extract content from first choice
         let content = raw
             .get("choices")
             .and_then(|c| c.get(0))
@@ -158,7 +68,6 @@ impl OpenAIProvider {
             .unwrap_or("")
             .to_string();
 
-        // Extract tool calls
         let tool_calls: Vec<ToolCall> = raw
             .get("choices")
             .and_then(|c| c.get(0))
@@ -187,7 +96,6 @@ impl OpenAIProvider {
             })
             .unwrap_or_default();
 
-        // Extract usage
         let usage = TokenUsage {
             prompt_tokens: raw
                 .get("usage")
@@ -215,22 +123,50 @@ impl OpenAIProvider {
     }
 }
 
-#[async_trait]
-impl LlmProvider for OpenAIProvider {
-    async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        let body = self.build_request(request);
-        let url = format!("{}/v1/chat/completions", self.config.base_url);
-        let auth = format!("Bearer {}", self.config.api_key);
+impl OpenAIAdapter {
+    fn message_to_openai(&self, msg: &Message) -> Option<serde_json::Value> {
+        match msg {
+            Message::System { content } => Some(serde_json::json!({
+                "role": "system",
+                "content": content,
+            })),
+            Message::User { content } => Some(serde_json::json!({
+                "role": "user",
+                "content": content,
+            })),
+            Message::Assistant {
+                content,
+                tool_calls,
+            } => {
+                if content.is_empty() && tool_calls.is_empty() {
+                    return None;
+                }
 
-        let resp = http_call(&self.client, &url, &body, "openai", |b| {
-            b.header("Authorization", &auth)
-        })
-        .await?;
+                let mut msg_obj = serde_json::json!({ "role": "assistant" });
 
-        self.parse_response(&resp.json)
-    }
+                if !content.is_empty() {
+                    msg_obj["content"] = serde_json::json!(content);
+                }
 
-    fn provider_id(&self) -> &str {
-        "openai"
+                if !tool_calls.is_empty() {
+                    let calls: Vec<serde_json::Value> = tool_calls
+                        .iter()
+                        .map(|tc| {
+                            serde_json::json!({
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": tc.arguments.to_string(),
+                                }
+                            })
+                        })
+                        .collect();
+                    msg_obj["tool_calls"] = serde_json::json!(calls);
+                }
+
+                Some(msg_obj)
+            }
+        }
     }
 }

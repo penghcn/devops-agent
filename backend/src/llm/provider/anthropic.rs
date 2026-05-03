@@ -1,79 +1,38 @@
-//! Anthropic Provider — implements `LlmProvider` using the Anthropic messages API.
-//!
-//! Supports tool use (native Anthropic format), system messages, and
-//! multi-turn conversations with tool results.
+//! Anthropic Adapter — implements ProviderAdapter for the Anthropic messages API.
 
-use async_trait::async_trait;
+use super::base::ProviderAdapter;
+use crate::llm::{ChatRequest, ChatResponse, LlmError, Message, TokenUsage, ToolCall};
 
-use super::http_client::http_call;
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+#[derive(Debug, Default)]
+pub struct AnthropicAdapter;
 
-/// Anthropic API configuration.
-#[derive(Debug, Clone)]
-pub struct AnthropicConfig {
-    pub api_key: String,
-    pub base_url: String,
-    pub default_model: String,
-    pub timeout_secs: u64,
-    /// Maximum tokens in the response (default: 4096).
-    pub max_tokens: u32,
-}
-
-impl Default for AnthropicConfig {
-    fn default() -> Self {
-        Self {
-            api_key: String::new(),
-            base_url: "https://api.anthropic.com".to_string(),
-            default_model: "claude-sonnet-4-20250514".to_string(),
-            timeout_secs: 60,
-            max_tokens: 4096,
-        }
-    }
-}
-
-/// Anthropic messages API client.
-#[derive(Debug)]
-pub struct AnthropicProvider {
-    config: AnthropicConfig,
-    client: reqwest::Client,
-}
-
-impl AnthropicProvider {
-    /// Create a new Anthropic provider.
-    ///
-    /// Returns `LlmError::MissingApiKey` if the api_key is empty.
-    pub fn new(config: AnthropicConfig) -> Result<Self, LlmError> {
-        if config.api_key.is_empty() {
-            return Err(LlmError::MissingApiKey {
-                provider: "anthropic".to_string(),
-            });
-        }
-
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .map_err(|e| LlmError::ParseError {
-                detail: format!("Failed to build HTTP client: {}", e),
-            })?;
-
-        Ok(Self { config, client })
+impl ProviderAdapter for AnthropicAdapter {
+    fn id(&self) -> &str {
+        "anthropic"
     }
 
-    /// Build the Anthropic API request body from a unified `ChatRequest`.
-    fn build_request(&self, request: &ChatRequest) -> serde_json::Value {
+    fn endpoint(&self, base: &str) -> String {
+        format!("{}/v1/messages", base)
+    }
+
+    fn headers(&self, api_key: &str, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        builder
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-10-01")
+    }
+
+    fn build_request(&self, request: &ChatRequest, default_model: &str) -> serde_json::Value {
         let model = if request.model.is_empty() {
-            &self.config.default_model
+            default_model
         } else {
             &request.model
         };
 
-        // Extract system message (Anthropic puts it at the top level, not in messages)
         let system = request.messages.iter().find_map(|msg| match msg {
             Message::System { content } => Some(content.clone()),
             _ => None,
         });
 
-        // Convert non-system messages to Anthropic format
         let messages: Vec<serde_json::Value> = request
             .messages
             .iter()
@@ -82,17 +41,15 @@ impl AnthropicProvider {
 
         let mut body = serde_json::json!({
             "model": model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": 4096,
             "messages": messages,
             "temperature": request.temperature.unwrap_or(0.0),
         });
 
-        // Add system if present
         if let Some(sys) = system {
             body["system"] = serde_json::json!(sys);
         }
 
-        // Add tools if present (Anthropic tool format uses input_schema)
         if let Some(ref tools) = request.tools {
             let anthropic_tools: Vec<serde_json::Value> = tools
                 .iter()
@@ -110,53 +67,7 @@ impl AnthropicProvider {
         body
     }
 
-    /// Convert a unified `Message` to Anthropic format.
-    /// System messages are handled separately (top-level `system` field).
-    fn message_to_anthropic(&self, msg: &Message) -> Option<serde_json::Value> {
-        match msg {
-            Message::System { .. } => None, // Handled at top level
-            Message::User { content } => Some(serde_json::json!({
-                "role": "user",
-                "content": content,
-            })),
-            Message::Assistant {
-                content,
-                tool_calls,
-            } => {
-                if content.is_empty() && tool_calls.is_empty() {
-                    return None;
-                }
-
-                // Anthropic expects content as an array of blocks
-                let mut blocks = Vec::new();
-
-                if !content.is_empty() {
-                    blocks.push(serde_json::json!({
-                        "type": "text",
-                        "text": content,
-                    }));
-                }
-
-                for tc in tool_calls {
-                    blocks.push(serde_json::json!({
-                        "type": "tool_use",
-                        "id": tc.id,
-                        "name": tc.name,
-                        "input": tc.arguments,
-                    }));
-                }
-
-                Some(serde_json::json!({
-                    "role": "assistant",
-                    "content": blocks,
-                }))
-            }
-        }
-    }
-
-    /// Parse the Anthropic API response into a unified `ChatResponse`.
     fn parse_response(&self, raw: &serde_json::Value) -> Result<ChatResponse, LlmError> {
-        // Extract content: iterate over content blocks, collect text
         let mut content_parts = Vec::new();
         let mut tool_calls = Vec::new();
 
@@ -195,7 +106,6 @@ impl AnthropicProvider {
             }
         }
 
-        // Extract usage
         let usage = TokenUsage {
             prompt_tokens: raw
                 .get("usage")
@@ -207,7 +117,7 @@ impl AnthropicProvider {
                 .and_then(|u| u.get("output_tokens"))
                 .and_then(|t| t.as_u64())
                 .unwrap_or(0) as u32,
-            total_tokens: 0, // Will be computed below
+            total_tokens: 0,
         };
 
         let total_tokens = usage.prompt_tokens + usage.completion_tokens;
@@ -224,23 +134,45 @@ impl AnthropicProvider {
     }
 }
 
-#[async_trait]
-impl LlmProvider for AnthropicProvider {
-    async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        let body = self.build_request(request);
-        let url = format!("{}/v1/messages", self.config.base_url);
-        let api_key = self.config.api_key.clone();
+impl AnthropicAdapter {
+    fn message_to_anthropic(&self, msg: &Message) -> Option<serde_json::Value> {
+        match msg {
+            Message::System { .. } => None,
+            Message::User { content } => Some(serde_json::json!({
+                "role": "user",
+                "content": content,
+            })),
+            Message::Assistant {
+                content,
+                tool_calls,
+            } => {
+                if content.is_empty() && tool_calls.is_empty() {
+                    return None;
+                }
 
-        let resp = http_call(&self.client, &url, &body, "anthropic", |b| {
-            b.header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-10-01")
-        })
-        .await?;
+                let mut blocks = Vec::new();
 
-        self.parse_response(&resp.json)
-    }
+                if !content.is_empty() {
+                    blocks.push(serde_json::json!({
+                        "type": "text",
+                        "text": content,
+                    }));
+                }
 
-    fn provider_id(&self) -> &str {
-        "anthropic"
+                for tc in tool_calls {
+                    blocks.push(serde_json::json!({
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.arguments,
+                    }));
+                }
+
+                Some(serde_json::json!({
+                    "role": "assistant",
+                    "content": blocks,
+                }))
+            }
+        }
     }
 }
