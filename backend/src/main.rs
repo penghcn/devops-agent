@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use devops_agent::api::AppState;
-use devops_agent::config::Config;
+use devops_agent::app_config::Config;
 use devops_agent::llm::{ChatRequest, LlmConfigStore, Message};
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 
@@ -16,7 +16,7 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     yunli::setup_logger()?;
 
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache_manager = Arc::new(JenkinsCacheManager::new(config.clone()));
     let llm_config_store = Arc::new(LlmConfigStore::from_providers(
         config.llm_providers.clone(),

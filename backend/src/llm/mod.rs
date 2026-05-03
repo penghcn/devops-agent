@@ -13,7 +13,7 @@ pub mod structured_output;
 
 pub use provider::{
     AnthropicConfig, AnthropicProvider, LlmConfigSnapshot, LlmConfigStore, OpenAIConfig,
-    OpenAIProvider, ProviderConfig, load_llm_providers,
+    OpenAIProvider, ProviderConfig,
 };
 pub use router::{ModelRouter, ModelRouterConfig, ProviderModels, TaskLevel};
 pub use structured_output::{StructuredOutput, StructuredOutputError};

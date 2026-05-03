@@ -1,9 +1,8 @@
 //! LLM Config Store — LLM 配置存储。
 //!
-//! 从环境变量加载 OpenAI / Anthropic 的 base_url 和 api_key。
+//! 从 config.toml 加载 provider 配置（由 app_config 模块提供）。
 //! 配置不可运行时修改（只读），前端仅可查看脱敏后的配置。
 
-use std::env;
 use std::sync::{Arc, RwLock};
 
 use super::{AnthropicConfig, AnthropicProvider, OpenAIConfig, OpenAIProvider};
@@ -182,43 +181,6 @@ fn mask_api_key(key: &str) -> String {
     } else {
         format!("{}****{}", &key[..4], &key[key.len() - 4..])
     }
-}
-
-/// 从环境变量加载 LLM provider 配置。
-pub fn load_llm_providers() -> Vec<ProviderConfig> {
-    let mut providers = Vec::new();
-
-    // OpenAI
-    let openai_api_key = env::var("OPENAI_API_KEY").ok();
-    if let Some(ref key) = openai_api_key
-        && !key.is_empty()
-    {
-        providers.push(ProviderConfig {
-            id: "openai".to_string(),
-            api_key: openai_api_key,
-            base_url: env::var("OPENAI_BASE_URL").ok(),
-            model_flash: env::var("OPENAI_MODEL_FLASH").ok(),
-            model_pro: env::var("OPENAI_MODEL_PRO").ok(),
-        });
-    }
-
-    // Anthropic
-    let anthropic_api_key = env::var("ANTHROPIC_API_KEY")
-        .or_else(|_| env::var("ANTHROPIC_AUTH_TOKEN"))
-        .ok();
-    if let Some(ref key) = anthropic_api_key
-        && !key.is_empty()
-    {
-        providers.push(ProviderConfig {
-            id: "anthropic".to_string(),
-            api_key: anthropic_api_key,
-            base_url: env::var("ANTHROPIC_BASE_URL").ok(),
-            model_flash: env::var("ANTHROPIC_MODEL_FLASH").ok(),
-            model_pro: env::var("ANTHROPIC_MODEL_PRO").ok(),
-        });
-    }
-
-    providers
 }
 
 #[cfg(test)]

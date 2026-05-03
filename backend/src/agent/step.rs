@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::config::Config;
+use crate::app_config::Config;
 use crate::llm::LlmProvider;
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 

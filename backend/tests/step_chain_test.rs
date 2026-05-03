@@ -1,6 +1,6 @@
 use devops_agent::agent::chain_mapping::to_chain_with_prompt;
 use devops_agent::agent::{Intent, IntentRouter, Step, StepContext, StepResult, TaskType};
-use devops_agent::config::Config;
+use devops_agent::app_config::Config;
 use devops_agent::tools::jenkins;
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ fn init_env() {
 /// 测试 StepContext 创建
 #[tokio::test]
 async fn test_step_context_creation() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let ctx = StepContext::new(
         "deploy order-service".to_string(),
         TaskType::default(),
@@ -32,7 +32,7 @@ async fn test_step_context_creation() {
 /// 测试 JobValidateStep 缺少 job_name 时中止
 #[tokio::test]
 async fn test_job_validate_missing_job_name() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let mut ctx = StepContext::new(
         "test".to_string(),
         TaskType::default(),
@@ -54,7 +54,7 @@ async fn test_job_validate_missing_job_name() {
 #[tokio::test]
 #[ignore]
 async fn test_job_validate_nonexistent_job() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let mut ctx = StepContext::new(
         "test".to_string(),
         TaskType::default(),
@@ -76,7 +76,7 @@ async fn test_job_validate_nonexistent_job() {
 #[tokio::test]
 #[ignore]
 async fn test_check_job_not_exists() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let (exists, _job_type, _name) =
         jenkins::check_job_exists("this-job-definitely-does-not-exist-xyz", &config)
             .await
@@ -88,7 +88,7 @@ async fn test_check_job_not_exists() {
 #[tokio::test]
 #[ignore]
 async fn test_intent_deploy() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config));
     cache.refresh().await.ok();
     let router = IntentRouter::new(cache);
@@ -100,7 +100,7 @@ async fn test_intent_deploy() {
 #[tokio::test]
 #[ignore]
 async fn test_intent_build() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config));
     cache.refresh().await.ok();
     let router = IntentRouter::new(cache);
@@ -112,7 +112,7 @@ async fn test_intent_build() {
 #[tokio::test]
 #[ignore]
 async fn test_intent_query() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config));
     cache.refresh().await.ok();
     let router = IntentRouter::new(cache);
@@ -128,7 +128,7 @@ async fn test_intent_query() {
 #[tokio::test]
 #[ignore]
 async fn test_intent_analyze() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config));
     cache.refresh().await.ok();
     let router = IntentRouter::new(cache);
@@ -144,7 +144,7 @@ async fn test_intent_analyze() {
 #[test]
 #[ignore]
 fn test_chain_deploy_pipeline() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config));
     let _router = IntentRouter::new(cache);
     let intent = Intent::DeployPipeline {
@@ -161,7 +161,7 @@ fn test_chain_deploy_pipeline() {
 #[test]
 #[ignore]
 fn test_chain_query_pipeline() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config));
     let _router = IntentRouter::new(cache);
     let intent = Intent::QueryPipeline {

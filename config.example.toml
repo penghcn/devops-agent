@@ -1,0 +1,36 @@
+# DevOps Agent 配置示例
+# 复制到 config.toml 后填写真实值
+#
+# 优先级: TOML 显式值 > .env > 系统环境变量
+# 环境变量引用: ${VAR_NAME} 或 $VAR_NAME
+
+log.level = "info"
+default_provider = "openai"
+
+[providers.openai]
+model_flash = "qwen3.6"
+model_pro = "deepseek-v4-pro"
+base_url = "${OPENAI_BASE_URL}"
+api_key = "${OPENAI_API_KEY}"
+
+[providers.anthropic]
+model_flash = "claude-sonnet-4-6"
+model_pro = "claude-opus-4-7"
+base_url = "${ANTHROPIC_BASE_URL}"
+api_key = "${ANTHROPIC_API_KEY}"
+
+[jenkins]
+url = "${JENKINS_URL}"
+user = "${JENKINS_USER}"
+token = "${JENKINS_TOKEN}"
+
+[gitlab]
+url = "https://gitlab.com"
+token = "${GITLAB_TOKEN}"
+
+[dev]
+claude_code_path = "claude"
+
+[server]
+cors_origins = ["http://localhost:5173"]
+# api_key = "your-api-key"

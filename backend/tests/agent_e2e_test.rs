@@ -1,5 +1,5 @@
 use devops_agent::agent::{AgentRequest, TaskType};
-use devops_agent::config::Config;
+use devops_agent::app_config::Config;
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
@@ -40,7 +40,7 @@ async fn test_process_request_general_intent() {
 #[tokio::test]
 #[ignore]
 async fn test_process_request_deploy_intent() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config.clone()));
     cache.refresh().await.ok();
     let req = make_request("部署 ds-pkg/dev 到 staging");
@@ -59,7 +59,7 @@ async fn test_process_request_deploy_intent() {
 #[tokio::test]
 #[ignore]
 async fn test_process_request_query_intent() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config.clone()));
     cache.refresh().await.ok();
     let req = make_request("查询 ds-pkg dev 的构建状态");
@@ -78,7 +78,7 @@ async fn test_process_request_query_intent() {
 #[tokio::test]
 #[ignore]
 async fn test_process_request_analyze_intent() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config.clone()));
     cache.refresh().await.ok();
     let req = make_request("分析 ds-pkg dev 的构建日志");
@@ -97,7 +97,7 @@ async fn test_process_request_analyze_intent() {
 #[tokio::test]
 #[ignore]
 async fn test_e2e_multi_branch_pipeline() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let cache = Arc::new(JenkinsCacheManager::new(config.clone()));
     let req = make_request("部署 ds-pkg dev 到 staging");
 

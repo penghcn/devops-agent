@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::app_config::Config;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use reqwest::{

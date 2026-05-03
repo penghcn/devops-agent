@@ -1,5 +1,5 @@
 use base64::Engine;
-use devops_agent::config::Config;
+use devops_agent::app_config::Config;
 use devops_agent::tools::jenkins;
 use reqwest::Client;
 use std::env;
@@ -115,7 +115,7 @@ async fn test_trigger_ds_pkg_dev_build() {
         .with_ansi(false)
         .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
         .init();
-    let config = Config::from_env();
+    let config = Config::from_file();
 
     // 触发构建 + 自动等待完成（封装在 trigger_pipeline + wait_for_pipeline 中）
     let message = jenkins::trigger_pipeline("ds-pkg", Some("dev"), &config)

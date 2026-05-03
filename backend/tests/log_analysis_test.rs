@@ -1,5 +1,5 @@
 use devops_agent::agent::{Step, StepContext, StepResult};
-use devops_agent::config::Config;
+use devops_agent::app_config::Config;
 use devops_agent::tools::jenkins;
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ fn init_env() {
 /// 测试 JenkinsLogStep 缺少 job_name 时中止
 #[tokio::test]
 async fn test_jenkins_log_step_missing_job_name() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let mut ctx = StepContext::new(
         "test".to_string(),
         devops_agent::agent::TaskType::default(),
@@ -33,7 +33,7 @@ async fn test_jenkins_log_step_missing_job_name() {
 /// 测试 JenkinsLogStep 缺少 branch 时中止
 #[tokio::test]
 async fn test_jenkins_log_step_missing_branch() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let mut ctx = StepContext::new(
         "test".to_string(),
         devops_agent::agent::TaskType::default(),
@@ -55,7 +55,7 @@ async fn test_jenkins_log_step_missing_branch() {
 /// 测试 JenkinsLogStep 缺少 build_number 时中止
 #[tokio::test]
 async fn test_jenkins_log_step_missing_build_number() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let mut ctx = StepContext::new(
         "test".to_string(),
         devops_agent::agent::TaskType::default(),
@@ -78,7 +78,7 @@ async fn test_jenkins_log_step_missing_build_number() {
 #[tokio::test]
 #[ignore]
 async fn test_get_real_build_log() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let build_num = get_latest_build_number("ds-pkg", Some("dev"), &config)
         .await
         .expect("Failed to get latest build number");
@@ -100,7 +100,7 @@ async fn test_get_real_build_log() {
 #[tokio::test]
 #[ignore]
 async fn test_log_analysis_success_build() {
-    let config = Config::from_env();
+    let config = Config::from_file();
     let build_num = get_latest_build_number("ds-pkg", Some("dev"), &config)
         .await
         .expect("Failed to get build number");
