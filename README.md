@@ -141,6 +141,10 @@ Agent 执行流程（精简版）：
 ```
 ## 部署、测试
 ```
+# 重启前后端
+# 端口默认 后端8080 前端3000，可在 config.toml 配置
+./scripts/run.sh
+
 # 1. 启动 Rust 后端
 cd backend
 ./run-signed.sh
@@ -152,7 +156,8 @@ cd frontend
 bun install
 bun run dev
 
-# 3. 访问 http://localhost:5173
+# 3. 访问 http://localhost:3000
+
 ```
 
 

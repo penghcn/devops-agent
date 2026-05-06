@@ -4,6 +4,7 @@
 .env.production
 .env.*.local
 .env.*.local.example
+config.toml
 
 # Rust build artifacts
 backend/target/

@@ -5,7 +5,8 @@ use axum::{
     routing::{get, post},
     serve,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::agent::{AgentRequest, AgentResponse};
@@ -27,6 +28,7 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
         .allow_headers(Any)
         .allow_origin(Any); // TODO: 生产环境使用 config.cors_origins
 
+    let port = state.config.backend_port;
     let app = Router::new()
         .route("/api/agent", post(handle_agent))
         .route("/api/cache", get(handle_cache))
@@ -34,7 +36,7 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
         .layer(cors)
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 8080))).await?;
+    let listener = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?;
     tracing::info!("Server running on http://{}", listener.local_addr()?);
     serve(listener, app).await?;
     Ok(())

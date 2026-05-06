@@ -67,7 +67,11 @@ struct RawDev {
 
 #[derive(Debug, Deserialize, Default)]
 struct RawServer {
-    #[serde(default = "default_cors_origins")]
+    #[serde(default = "default_port")]
+    port: u16,
+    #[serde(default = "default_backend_port")]
+    backend_port: u16,
+    #[serde(default)]
     cors_origins: Vec<String>,
     api_key: Option<String>,
 }
@@ -96,8 +100,45 @@ fn default_claude_path() -> String {
     "claude".to_string()
 }
 
-fn default_cors_origins() -> Vec<String> {
-    vec!["http://localhost:5173".to_string()]
+fn default_port() -> u16 {
+    3000
+}
+
+fn default_backend_port() -> u16 {
+    8080
+}
+
+/// 判断字符串是否为占位符（如 `<your-jenkins-api-token>`、`<gitlab-host>`）。
+fn is_placeholder(s: &str) -> bool {
+    s.starts_with('<') && s.ends_with('>')
+}
+
+/// 过滤无效值：空字符串和占位符视为 None。
+fn filter_val(s: &str) -> bool {
+    !s.is_empty() && !is_placeholder(s)
+}
+
+/// TOML 字段优先，回退到环境变量。
+/// 占位符格式（`<xxx>`）视为未配置，空字符串也视为 None。
+fn env_or(toml_val: Option<String>, env_var: &str) -> Option<String> {
+    toml_val
+        .filter(|s| filter_val(s))
+        .or_else(|| env::var(env_var).ok().filter(|s| filter_val(s)))
+}
+
+/// 获取可选配置值，缺失时 warn 并返回空字符串。
+fn optional_str(toml_val: Option<String>, env_var: &str, name: &str) -> String {
+    match env_or(toml_val, env_var) {
+        Some(v) => v,
+        None => {
+            tracing::warn!(
+                "{} not set (config.toml or {} env var), using empty string",
+                name,
+                env_var
+            );
+            String::new()
+        }
+    }
 }
 
 // ── 公开配置结构 ──
@@ -107,6 +148,8 @@ pub struct Config {
     pub log_level: String,
     pub llm_providers: Vec<ProviderConfig>,
     pub default_provider: String,
+    pub port: u16,
+    pub backend_port: u16,
     pub jenkins_url: String,
     pub jenkins_user: String,
     pub jenkins_token: String,
@@ -145,33 +188,32 @@ impl Config {
         let raw: RawConfig = serde_json::from_value(json)
             .unwrap_or_else(|e| panic!("Failed to deserialize config: {}", e));
 
-        let providers = Self::build_providers(raw.providers);
+        let providers = Self::build_providers_with_env(raw.providers);
+        let backend_port = raw.server.backend_port;
+        let port = raw.server.port;
+        let cors_origins = if raw.server.cors_origins.is_empty() {
+            vec![format!("http://localhost:{port}")]
+        } else {
+            raw.server.cors_origins.clone()
+        };
         let config = Self {
             log_level: raw.log.level,
             llm_providers: providers,
-            default_provider: raw.default_provider,
-            jenkins_url: raw
-                .jenkins
-                .url
-                .expect("jenkins.url not set in config.toml")
+            default_provider: env_or(Some(raw.default_provider), "DEFAULT_PROVIDER")
+                .unwrap_or_else(default_default_provider),
+            backend_port,
+            port,
+            jenkins_url: optional_str(raw.jenkins.url, "JENKINS_URL", "jenkins.url")
                 .trim_end_matches('/')
                 .to_string(),
-            jenkins_user: raw
-                .jenkins
-                .user
-                .expect("jenkins.user not set in config.toml"),
-            jenkins_token: raw
-                .jenkins
-                .token
-                .expect("jenkins.token not set in config.toml"),
+            jenkins_user: optional_str(raw.jenkins.user, "JENKINS_USER", "jenkins.user"),
+            jenkins_token: optional_str(raw.jenkins.token, "JENKINS_TOKEN", "jenkins.token"),
             gitlab_url: raw.gitlab.url,
-            gitlab_token: raw
-                .gitlab
-                .token
-                .expect("gitlab.token not set in config.toml"),
-            claude_code_path: raw.dev.claude_code_path,
-            cors_origins: raw.server.cors_origins,
-            api_key: raw.server.api_key,
+            gitlab_token: optional_str(raw.gitlab.token, "GITLAB_TOKEN", "gitlab.token"),
+            claude_code_path: env_or(Some(raw.dev.claude_code_path), "CLAUDE_CODE_PATH")
+                .unwrap_or_else(default_claude_path),
+            cors_origins,
+            api_key: env_or(raw.server.api_key, "SERVER_API_KEY"),
         };
 
         config.validate_llm()
@@ -188,18 +230,20 @@ impl Config {
         "config.toml"
     }
 
-    /// 将 RawProvider 转换为 ProviderConfig
-    fn build_providers(raw: HashMap<String, RawProvider>) -> Vec<ProviderConfig> {
+    /// 将 RawProvider 转换为 ProviderConfig，TOML 字段优先，回退到环境变量。
+    /// 环境变量命名: {ID_UPPER}_API_KEY / {ID_UPPER}_BASE_URL / {ID_UPPER}_MODEL_FLASH / {ID_UPPER}_MODEL_PRO
+    fn build_providers_with_env(raw: HashMap<String, RawProvider>) -> Vec<ProviderConfig> {
         let mut providers = Vec::new();
         let mut entries: Vec<_> = raw.into_iter().collect();
         entries.sort_by_key(|(k, _)| k.clone());
         for (id, p) in entries {
+            let env_prefix = id.to_uppercase();
             providers.push(ProviderConfig {
                 id,
-                api_key: p.api_key,
-                base_url: p.base_url,
-                model_flash: p.model_flash,
-                model_pro: p.model_pro,
+                api_key: env_or(p.api_key, &format!("{env_prefix}_API_KEY")),
+                base_url: env_or(p.base_url, &format!("{env_prefix}_BASE_URL")),
+                model_flash: env_or(p.model_flash, &format!("{env_prefix}_MODEL_FLASH")),
+                model_pro: env_or(p.model_pro, &format!("{env_prefix}_MODEL_PRO")),
             });
         }
         providers
@@ -223,6 +267,8 @@ impl Config {
     pub fn test_default() -> Self {
         Self {
             log_level: "info".to_string(),
+            port: 3000,
+            backend_port: 8080,
             jenkins_url: "http://localhost:8080".to_string(),
             jenkins_user: "test-user".to_string(),
             jenkins_token: "test-token".to_string(),
@@ -237,7 +283,7 @@ impl Config {
                 model_pro: None,
             }],
             default_provider: "openai".to_string(),
-            cors_origins: vec!["http://localhost:5173".to_string()],
+            cors_origins: vec!["http://localhost:3000".to_string()],
             api_key: None,
         }
     }

@@ -17,11 +17,22 @@ async fn run() -> anyhow::Result<()> {
     yunli::setup_logger()?;
 
     let config = Config::from_file();
+    let backend_port = config.backend_port;
+    let port = config.port;
     let cache_manager = Arc::new(JenkinsCacheManager::new(config.clone()));
     let llm_config_store = Arc::new(LlmConfigStore::from_providers(
         config.llm_providers.clone(),
         config.default_provider.clone(),
     ));
+
+    // 写端口文件供 run.sh 使用
+    let port_dir = std::env::var("DEVOPS_LOG_DIR").unwrap_or_else(|_| "logs".to_string());
+    if let Err(e) = std::fs::write(format!("{port_dir}/backend.port"), backend_port.to_string()) {
+        tracing::warn!("Failed to write backend.port: {}", e);
+    }
+    if let Err(e) = std::fs::write(format!("{port_dir}/frontend.port"), port.to_string()) {
+        tracing::warn!("Failed to write frontend.port: {}", e);
+    }
 
     log_startup(&llm_config_store);
     spawn_cache_loader(cache_manager.clone());
