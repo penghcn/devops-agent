@@ -1,6 +1,7 @@
 #!/bin/bash
-# 编译项目
-cargo build --release
+# 编译项目 
+# 开发模式使用 debug 构建
+cargo build
 
 # 获取二进制文件路径（根据你的项目名修改 `devops-agent`）
 BIN_PATH="/Users/pengh/data/app/target/debug/devops-agent"

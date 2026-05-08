@@ -2,23 +2,24 @@ use base64::Engine;
 use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
 use reqwest::Client;
-use std::env;
+use std::path::Path;
 
-// 测试前加载 .env 文件
-#[ctor::ctor]
-fn init_env() {
-    dotenv::dotenv().ok();
+/// 检查配置文件是否存在，不存在则 panic 带清晰提示（测试框架会捕获）
+fn require_config() {
+    let candidates = ["config.toml", "backend/config.toml", "../config.toml"];
+    assert!(
+        candidates.iter().any(|p| Path::new(p).exists()),
+        "Jenkins 测试需要 config.toml。请放在项目根目录、backend/ 或 ../ 下（相对于 CWD）"
+    );
 }
 
-/// 获取 Jenkins 配置
-fn get_jenkins_config() -> (String, String, String) {
-    let url = env::var("JENKINS_URL")
-        .expect("JENKINS_URL not set")
-        .trim_end_matches('/')
-        .to_string();
-    let user = env::var("JENKINS_USER").expect("JENKINS_USER not set");
-    let token = env::var("JENKINS_TOKEN").expect("JENKINS_TOKEN not set");
-    (url, user, token)
+/// 获取 Jenkins 配置引用（通过 Config 三层加载：TOML > .env > 环境变量）
+fn get_jenkins_config(config: &Config) -> (&str, &str, &str) {
+    (
+        &config.jenkins_url,
+        &config.jenkins_user,
+        &config.jenkins_token,
+    )
 }
 
 /// 构建 Basic Auth Header
@@ -32,12 +33,14 @@ fn build_auth_header(user: &str, token: &str) -> String {
 
 #[tokio::test]
 async fn test_jenkins_connectivity() {
-    let (url, user, token) = get_jenkins_config();
+    require_config();
+    let config = Config::from_file();
+    let (url, user, token) = get_jenkins_config(&config);
     let client = Client::new();
-    let auth = build_auth_header(&user, &token);
+    let auth = build_auth_header(user, token);
 
     let response = client
-        .get(&format!("{}/api/json", url))
+        .get(format!("{}/api/json", url))
         .header("Authorization", &auth)
         .send()
         .await
@@ -51,12 +54,14 @@ async fn test_jenkins_connectivity() {
 
 #[tokio::test]
 async fn test_ds_pkg_job_exists() {
-    let (url, user, token) = get_jenkins_config();
+    require_config();
+    let config = Config::from_file();
+    let (url, user, token) = get_jenkins_config(&config);
     let client = Client::new();
-    let auth = build_auth_header(&user, &token);
+    let auth = build_auth_header(user, token);
 
     let response = client
-        .get(&format!("{}/job/ds-pkg/api/json", url))
+        .get(format!("{}/job/ds-pkg/api/json", url))
         .header("Authorization", &auth)
         .send()
         .await
@@ -68,10 +73,13 @@ async fn test_ds_pkg_job_exists() {
     println!("Job type: {:?}", body.get("_class"));
 
     // ds-pkg 应该是 Pipeline 多分支项目
-    let class: &str = body.get("_class").and_then(|v| v.as_str()).unwrap_or("");
+    let class = body
+        .get("_class")
+        .and_then(|v| v.as_str())
+        .expect("ds-pkg 响应缺少 _class 字段");
     assert!(
         class.contains("WorkflowMultiBranchProject"),
-        "ds-pkg should be a Pipeline Multi-Branch project, got: {}",
+        "ds-pkg 应该是 Pipeline Multi-Branch 项目，实际: {}",
         class
     );
 }
@@ -79,12 +87,14 @@ async fn test_ds_pkg_job_exists() {
 #[tokio::test]
 #[ignore]
 async fn test_ds_pkg_dev_branch_exists() {
-    let (url, user, token) = get_jenkins_config();
+    require_config();
+    let config = Config::from_file();
+    let (url, user, token) = get_jenkins_config(&config);
     let client = Client::new();
-    let auth = build_auth_header(&user, &token);
+    let auth = build_auth_header(user, token);
 
     let response = client
-        .get(&format!("{}/job/ds-pkg/job/dev/api/json", url))
+        .get(format!("{}/job/ds-pkg/job/dev/api/json", url))
         .header("Authorization", &auth)
         .send()
         .await
@@ -99,10 +109,13 @@ async fn test_ds_pkg_dev_branch_exists() {
     println!("Branch type: {:?}", body.get("_class"));
 
     // dev 分支应该是 Pipeline Job
-    let class: &str = body.get("_class").and_then(|v| v.as_str()).unwrap_or("");
+    let class = body
+        .get("_class")
+        .and_then(|v| v.as_str())
+        .expect("dev 分支响应缺少 _class 字段");
     assert!(
         class.contains("WorkflowJob"),
-        "dev branch should be a Pipeline job, got: {}",
+        "dev 分支应该是 Pipeline Job，实际: {}",
         class
     );
 }
@@ -110,11 +123,12 @@ async fn test_ds_pkg_dev_branch_exists() {
 #[tokio::test]
 #[ignore]
 async fn test_trigger_ds_pkg_dev_build() {
-    tracing_subscriber::fmt()
+    require_config();
+    let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_ansi(false)
         .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
-        .init();
+        .try_init();
     let config = Config::from_file();
 
     // 触发构建 + 自动等待完成（封装在 trigger_pipeline + wait_for_pipeline 中）
@@ -126,8 +140,7 @@ async fn test_trigger_ds_pkg_dev_build() {
     // 从消息中提取构建号
     let build_num = message
         .split('/')
-        .filter(|s| s.parse::<u32>().is_ok())
-        .next()
+        .find(|s| s.parse::<u32>().is_ok())
         .and_then(|s| s.parse::<u32>().ok())
         .expect("No build number in message");
     println!("Build #{} triggered", build_num);
@@ -158,13 +171,15 @@ async fn test_trigger_ds_pkg_dev_build() {
 #[tokio::test]
 #[ignore]
 async fn test_get_latest_build_status() {
-    let (url, user, token) = get_jenkins_config();
+    require_config();
+    let config = Config::from_file();
+    let (url, user, token) = get_jenkins_config(&config);
     let client = Client::new();
-    let auth = build_auth_header(&user, &token);
+    let auth = build_auth_header(user, token);
 
     // 获取最新构建信息
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/job/ds-pkg/job/dev/api/json?fields=lastBuild,number",
             url
         ))

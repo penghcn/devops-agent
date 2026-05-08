@@ -1,6 +1,8 @@
 #!/bin/bash
-# 优雅重启前后端，先检测并优雅杀死之前的进程
-# 用法: ./scripts/run.sh
+# 优雅启动/停止前后端
+# 用法: ./scripts/run.sh [start|stop]
+#   start  启动前后端（默认，省略时等同 start）
+#   stop   优雅停止前后端
 set -euo pipefail
 
 BIN_DIR="$HOME/data/app/"
@@ -20,7 +22,7 @@ graceful_kill() {
 
   if [[ ! -f "$pid_file" ]]; then
     echo "  $label 无旧进程"
-    return 0
+    return 1
   fi
 
   local pid
@@ -30,7 +32,7 @@ graceful_kill() {
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "  $label 进程已结束 (pid=$pid)，清理 pid 文件"
     rm -f "$pid_file"
-    return 0
+    return 1
   fi
 
   echo "  $label 发现运行中进程 (pid=$pid)，发送 SIGTERM..."
@@ -51,11 +53,43 @@ graceful_kill() {
   kill -9 "$pid" 2>/dev/null || true
   sleep 1
   echo "  $label 已强制终止"
+  return 0
 }
 
+# 处理 stop 参数
+if [[ "${1:-}" == "stop" ]]; then
+  echo "=== 优雅停止 ==="
+  stopped=0
+  graceful_kill "$PID_FILE_BACKEND" "后端" && stopped=$((stopped + 1))
+  graceful_kill "$PID_FILE_FRONTEND" "前端" && stopped=$((stopped + 1))
+
+  # 清理残留后端进程
+  orphan_pids=$(pgrep -f "target/debug/devops-agent" 2>/dev/null || true)
+  if [[ -n "$orphan_pids" ]]; then
+    echo "  清理残留后端进程: $orphan_pids"
+    echo "$orphan_pids" | xargs kill 2>/dev/null || true
+    stopped=$((stopped + 1))
+  fi
+
+  # 清理残留前端进程
+  orphan_frontend=$(pgrep -f "bun run dev" 2>/dev/null || true)
+  if [[ -n "$orphan_frontend" ]]; then
+    echo "  清理残留前端进程: $orphan_frontend"
+    echo "$orphan_frontend" | xargs kill 2>/dev/null || true
+    stopped=$((stopped + 1))
+  fi
+
+  if [[ "$stopped" -eq 0 ]]; then
+    echo "无运行中进程"
+  else
+    echo "已停止 $stopped 个进程"
+  fi
+  exit 0
+fi
+
 echo "=== 检查旧进程 ==="
-graceful_kill "$PID_FILE_BACKEND" "后端"
-graceful_kill "$PID_FILE_FRONTEND" "前端"
+graceful_kill "$PID_FILE_BACKEND" "后端" || true
+graceful_kill "$PID_FILE_FRONTEND" "前端" || true
 
 # 清理残留的 devops-agent 进程
 orphan_pids=$(pgrep -f "target/debug/devops-agent" 2>/dev/null || true)
