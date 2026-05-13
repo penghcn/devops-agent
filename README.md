@@ -63,7 +63,7 @@ backend/src/
 │       ├── mod.rs
 │       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>
 │       ├── config.rs          # ProviderConfig + LlmConfigStore + build_model_router()
-│       ├── http_client.rs     # 共享 HTTP 调用逻辑
+│       ├── client.rs          # 共享 HTTP 调用逻辑
 │       ├── openai.rs          # OpenAIAdapter + OpenAIProvider 封装
 │       └── anthropic.rs       # AnthropicAdapter + AnthropicProvider 封装
 │
@@ -84,7 +84,7 @@ backend/src/
 │       ├── claude_analyze.rs  # Claude 分析构建结果
 │       └── claude_code.rs     # Claude 代码生成
 │
-└── frontend/                  # Vue 3 + TS + Vite + TailwindCSS 前端
+└── frontend/                  # Vue 3.5 + TS + Vite 8 + Tailwind CSS 4 前端（SSE 流式推送）
 ```
 
 ### 模块关系
@@ -101,9 +101,10 @@ backend/src/
               ├── IntentRouter → 意图识别
               │     ├── 正则匹配（精确指令）
               │     ├── LLM 结构化输出（自然语言）
-              │     └── Jenkins 缓存（Job/分支补全）
+              │     ├── Jenkins 缓存（Job/分支模糊匹配 + Levenshtein 修正）
+              │     └── Correction 记录（job/branch 修正提示，前端展示）
               │
-              ├── StepChain → 步骤编排执行
+              ├── StepChain → 步骤编排执行（支持 SSE 流式推送）
               │     ├── JobValidate → JenkinsTrigger → JenkinsWait
               │     └── JenkinsLog → ClaudeAnalyze / ClaudeCode
               │
