@@ -1,9 +1,13 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { env } from 'process'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [tailwindcss(), vue()],
+  build: {
+    cssMinify: 'esbuild',
+  },
   server: {
     port: parseInt(env.FRONTEND_PORT || '', 10) || 3000,
     proxy: {

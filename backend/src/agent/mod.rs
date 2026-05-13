@@ -46,8 +46,16 @@ pub struct AgentResponse {
     pub steps: Vec<AgentStep>, // 展示思考过程
     #[serde(skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<serde_json::Value>, // Claude 结构化分析结果
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub branch_correction: Option<String>, // 分支名模糊修正提示
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub corrections: Vec<Correction>, // job/branch 模糊修正提示
+}
+
+/// 模糊修正记录（job 名或分支名）
+#[derive(Debug, Clone, Serialize)]
+pub struct Correction {
+    pub kind: String,
+    pub original: String,
+    pub corrected: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +64,31 @@ pub struct AgentStep {
     pub result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed: Option<f64>,
+}
+
+/// SSE 流式推送事件
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum StreamEvent {
+    /// Step 开始执行
+    StepStart { step_index: usize, action: String },
+    /// Step 完成
+    StepDone {
+        step_index: usize,
+        action: String,
+        result: String,
+        elapsed: f64,
+    },
+    /// 最终完成
+    Complete {
+        success: bool,
+        output: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        structured_output: Option<serde_json::Value>,
+        steps: Vec<AgentStep>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        corrections: Vec<Correction>,
+    },
 }
 
 /// 主 Agent 入口 — 基于步骤链架构

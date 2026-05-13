@@ -83,6 +83,26 @@ fn find_branch_match(user_branch: &str, cached_branches: &[String]) -> (String, 
     (user_branch.to_string(), false)
 }
 
+/// Find the best matching job name in the cache.
+/// Returns (matched_name, was_corrected).
+fn find_job_match(user_job: &str, cached_jobs: &[String]) -> (String, bool) {
+    if let Some(found) = cached_jobs.iter().find(|j| *j == user_job) {
+        return (found.clone(), false);
+    }
+    if let Some(found) = cached_jobs.iter().find(|j| j.starts_with(user_job)) {
+        return (found.clone(), true);
+    }
+    if let Some((best, dist)) = cached_jobs
+        .iter()
+        .map(|j| (j.as_str(), levenshtein_distance(user_job, j)))
+        .min_by_key(|(_, d)| *d)
+        && dist <= 1
+    {
+        return (best.to_string(), true);
+    }
+    (user_job.to_string(), false)
+}
+
 pub struct IntentRouter {
     cache: Arc<JenkinsCacheManager>,
     llm_provider: Option<Arc<dyn crate::llm::LlmProvider>>,
@@ -110,18 +130,37 @@ impl IntentRouter {
         }
     }
 
-    pub async fn identify(&self, prompt: &str) -> (Intent, Option<(String, String)>) {
-        if let Some((action, job_name, branch)) = self.parse_simple(prompt)
-            && let Some((intent, correction)) = self
+    pub fn cache(&self) -> &Arc<JenkinsCacheManager> {
+        &self.cache
+    }
+
+    pub async fn identify(&self, prompt: &str) -> (Intent, Vec<crate::agent::Correction>) {
+        if let Some((action, job_name, branch)) = self.parse_simple(prompt) {
+            if let Some((intent, corrections)) = self
                 .resolve_from_simple(&action, &job_name, branch.as_deref())
                 .await
-        {
-            return (intent, correction);
+            {
+                return (intent, corrections);
+            }
+            let (job, br) = if let Some((j, b)) = job_name.split_once('/') {
+                (j.to_string(), Some(b.to_string()))
+            } else if let Some(b) = &branch {
+                (job_name, Some(b.clone()))
+            } else {
+                (job_name, None)
+            };
+            return (
+                build_intent(&action, &job, br, JobType::Standard),
+                Vec::new(),
+            );
         }
 
         match self.parse_with_llm(prompt).await {
-            Some(intent) => (self.match_cache(intent).await, None),
-            None => (Intent::General, None),
+            Some(intent) => {
+                let (resolved, corrections) = self.match_cache(intent).await;
+                (resolved, corrections)
+            }
+            None => (Intent::General, Vec::new()),
         }
     }
 
@@ -130,8 +169,11 @@ impl IntentRouter {
         action: &str,
         raw_job: &str,
         branch_hint: Option<&str>,
-    ) -> Option<(Intent, Option<(String, String)>)> {
+    ) -> Option<(Intent, Vec<crate::agent::Correction>)> {
+        use crate::agent::Correction;
+
         let cache_data = self.cache.get_cached().await?;
+        let job_names: Vec<String> = cache_data.jobs.iter().map(|j| j.name.clone()).collect();
 
         let (job_name, branch) = if let Some((j, b)) = raw_job.split_once('/') {
             (j.to_string(), Some(b.to_string()))
@@ -141,7 +183,17 @@ impl IntentRouter {
             (raw_job.to_string(), None)
         };
 
-        let cached = cache_data.jobs.iter().find(|j| j.name == job_name)?;
+        let (matched_job, job_corrected) = find_job_match(&job_name, &job_names);
+        let cached = cache_data.jobs.iter().find(|j| j.name == matched_job)?;
+        let mut corrections: Vec<Correction> = Vec::new();
+
+        if job_corrected {
+            corrections.push(Correction {
+                kind: "job".into(),
+                original: job_name.clone(),
+                corrected: matched_job.clone(),
+            });
+        }
 
         let jt = if cached.job_type == "pipeline_multibranch" {
             JobType::Branch
@@ -151,12 +203,14 @@ impl IntentRouter {
 
         if cached.job_type == "pipeline_multibranch" {
             let branch = branch.filter(|b| !b.is_empty());
-            let mut correction: Option<(String, String)> = None;
-
             let branch = if let Some(b) = &branch {
                 let (matched, was_corrected) = find_branch_match(b, &cached.branches);
                 if was_corrected {
-                    correction = Some((b.clone(), matched.clone()));
+                    corrections.push(Correction {
+                        kind: "branch".into(),
+                        original: b.clone(),
+                        corrected: matched.clone(),
+                    });
                 }
                 Some(matched)
             } else {
@@ -164,24 +218,25 @@ impl IntentRouter {
             };
 
             tracing::info!(
-                "Intent regex match: action='{}', job='{}', branch={:?}, correction={:?} (from cache)",
+                "Intent regex match: action='{}', job='{}', branch={:?}, corrections={:?} (from cache)",
                 action,
-                job_name,
+                matched_job,
                 branch,
-                correction
+                corrections
             );
-            return Some((build_intent(action, &job_name, branch, jt), correction));
+            return Some((build_intent(action, &matched_job, branch, jt), corrections));
         }
 
         let branch = branch.filter(|b| !b.is_empty());
         tracing::info!(
-            "Intent regex match: action='{}', job='{}', branch={:?} (from cache)",
+            "Intent regex match: action='{}', job='{}', branch={:?}, corrections={:?} (from cache)",
             action,
-            job_name,
-            branch
+            matched_job,
+            branch,
+            corrections
         );
 
-        Some((build_intent(action, &job_name, branch, jt), None))
+        Some((build_intent(action, &matched_job, branch, jt), corrections))
     }
 
     pub fn parse_simple(&self, prompt: &str) -> Option<(String, String, Option<String>)> {
@@ -289,73 +344,194 @@ impl IntentRouter {
         }
     }
 
-    async fn match_cache(&self, intent: Intent) -> Intent {
-        if intent.branch_is_some() {
-            return intent;
-        }
+    async fn match_cache(&self, intent: Intent) -> (Intent, Vec<crate::agent::Correction>) {
+        use crate::agent::Correction;
 
-        let (raw_job, _) = extract_fields(&intent);
+        let (raw_job, raw_branch) = extract_fields(&intent);
         let Some(raw_job) = raw_job else {
-            return intent;
+            return (intent, Vec::new());
         };
 
         let cache_data = match self.cache.get_cached().await {
             Some(c) => c,
-            None => return intent,
+            None => return (intent, Vec::new()),
         };
 
-        if let Some((job, branch)) = raw_job.split_once('/')
-            && let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job)
-        {
-            tracing::info!(
-                "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split)",
-                raw_job,
-                job,
-                branch
-            );
-            return replace_intent_fields(
-                &intent,
-                job.to_string(),
-                Some(branch.to_string()),
-                if cached.job_type == "pipeline_multibranch" {
+        let job_names: Vec<String> = cache_data.jobs.iter().map(|j| j.name.clone()).collect();
+
+        // 先尝试从 job_name 中拆分 branch（ds-pkg/dev 格式）
+        if let Some((job, branch)) = raw_job.split_once('/') {
+            let (matched_job, job_corrected) = find_job_match(job, &job_names);
+            if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == matched_job) {
+                let jt = if cached.job_type == "pipeline_multibranch" {
                     JobType::Branch
                 } else {
                     JobType::Standard
-                },
-            );
+                };
+
+                let mut corrections: Vec<Correction> = Vec::new();
+                if job_corrected {
+                    corrections.push(Correction {
+                        kind: "job".into(),
+                        original: job.to_string(),
+                        corrected: matched_job.clone(),
+                    });
+                }
+
+                if cached.job_type == "pipeline_multibranch" {
+                    let (matched_branch, branch_corrected) =
+                        find_branch_match(branch, &cached.branches);
+                    if branch_corrected {
+                        corrections.push(Correction {
+                            kind: "branch".into(),
+                            original: branch.to_string(),
+                            corrected: matched_branch.clone(),
+                        });
+                    }
+                    tracing::info!(
+                        "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split){}",
+                        raw_job,
+                        matched_job,
+                        matched_branch,
+                        if job_corrected || branch_corrected {
+                            " [corrected]"
+                        } else {
+                            ""
+                        }
+                    );
+                    return (
+                        replace_intent_fields(&intent, matched_job, Some(matched_branch), jt),
+                        corrections,
+                    );
+                }
+
+                tracing::info!(
+                    "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, slash split){}",
+                    raw_job,
+                    matched_job,
+                    branch,
+                    if job_corrected { " [corrected]" } else { "" }
+                );
+                return (
+                    replace_intent_fields(&intent, matched_job, Some(branch.to_string()), jt),
+                    corrections,
+                );
+            }
         }
 
+        // 按空格拆分 job/branch
         let parts: Vec<&str> = raw_job.split_whitespace().collect();
         if parts.len() >= 2 {
             for i in 0..parts.len() - 1 {
                 let job = parts[..=i].join(" ");
                 let branch = parts[i + 1..].join(" ");
-                if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == job) {
+                let (matched_job, job_corrected) = find_job_match(&job, &job_names);
+                if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == matched_job) {
+                    let jt = if cached.job_type == "pipeline_multibranch" {
+                        JobType::Branch
+                    } else {
+                        JobType::Standard
+                    };
+
+                    let mut corrections: Vec<Correction> = Vec::new();
+                    if job_corrected {
+                        corrections.push(Correction {
+                            kind: "job".into(),
+                            original: job.clone(),
+                            corrected: matched_job.clone(),
+                        });
+                    }
+
+                    if cached.job_type == "pipeline_multibranch" {
+                        let (matched_branch, branch_corrected) =
+                            find_branch_match(&branch, &cached.branches);
+                        if branch_corrected {
+                            corrections.push(Correction {
+                                kind: "branch".into(),
+                                original: branch.clone(),
+                                corrected: matched_branch.clone(),
+                            });
+                        }
+                        tracing::info!(
+                            "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split){}",
+                            raw_job,
+                            matched_job,
+                            matched_branch,
+                            if job_corrected || branch_corrected {
+                                " [corrected]"
+                            } else {
+                                ""
+                            }
+                        );
+                        return (
+                            replace_intent_fields(&intent, matched_job, Some(matched_branch), jt),
+                            corrections,
+                        );
+                    }
+
                     tracing::info!(
-                        "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split)",
+                        "Intent cache match: '{}' -> job='{}', branch='{}' (from cache, space split){}",
                         raw_job,
-                        job,
-                        branch
+                        matched_job,
+                        branch,
+                        if job_corrected { " [corrected]" } else { "" }
                     );
-                    return replace_intent_fields(
-                        &intent,
-                        job,
-                        Some(branch),
-                        if cached.job_type == "pipeline_multibranch" {
-                            JobType::Branch
-                        } else {
-                            JobType::Standard
-                        },
+                    return (
+                        replace_intent_fields(&intent, matched_job, Some(branch), jt),
+                        corrections,
                     );
                 }
             }
         }
 
-        if cache_data.jobs.iter().any(|j| j.name == raw_job) {
-            return intent;
+        // LLM 解析的 branch 字段 + job 名模糊匹配
+        {
+            let (matched_job, job_corrected) = find_job_match(&raw_job, &job_names);
+            if let Some(cached) = cache_data.jobs.iter().find(|j| j.name == matched_job)
+                && cached.job_type == "pipeline_multibranch"
+                && let Some(branch) = &raw_branch
+            {
+                let (matched_branch, branch_corrected) =
+                    find_branch_match(branch, &cached.branches);
+                let mut corrections: Vec<Correction> = Vec::new();
+                if job_corrected {
+                    corrections.push(Correction {
+                        kind: "job".into(),
+                        original: raw_job.clone(),
+                        corrected: matched_job.clone(),
+                    });
+                }
+                if branch_corrected {
+                    corrections.push(Correction {
+                        kind: "branch".into(),
+                        original: branch.clone(),
+                        corrected: matched_branch.clone(),
+                    });
+                }
+                let jt = JobType::Branch;
+                tracing::info!(
+                    "Intent cache match: job='{}', branch='{}' -> '{}' (from cache, LLM branch){}",
+                    matched_job,
+                    branch,
+                    matched_branch,
+                    if job_corrected || branch_corrected {
+                        " [corrected]"
+                    } else {
+                        ""
+                    }
+                );
+                return (
+                    replace_intent_fields(&intent, matched_job, Some(matched_branch), jt),
+                    corrections,
+                );
+            }
         }
 
-        intent
+        if cache_data.jobs.iter().any(|j| j.name == raw_job) {
+            return (intent, Vec::new());
+        }
+
+        (intent, Vec::new())
     }
 
     pub async fn execute(
@@ -367,7 +543,7 @@ impl IntentRouter {
         llm_model: Option<String>,
     ) -> AgentResponse {
         let start = std::time::Instant::now();
-        let (intent, branch_correction) = self.identify(prompt).await;
+        let (intent, corrections) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
         let chain = to_chain_with_prompt(&intent, prompt, llm_provider.clone(), llm_model.clone());
@@ -384,11 +560,9 @@ impl IntentRouter {
         if let Some(model) = llm_model {
             ctx = ctx.with_llm_model(model);
         }
-        let ctx = if let Some((orig, corrected)) = &branch_correction {
-            ctx.with_branch_correction(format!("原始分支 '{}' 已修正为 '{}'", orig, corrected))
-        } else {
-            ctx
-        };
+        for c in &corrections {
+            ctx = ctx.add_correction(c.kind.clone(), c.original.clone(), c.corrected.clone());
+        }
 
         let (final_ctx, steps) = chain.execute(ctx).await;
 
@@ -415,7 +589,7 @@ impl IntentRouter {
             output,
             structured_output: final_ctx.structured_analysis.clone(),
             steps,
-            branch_correction: final_ctx.branch_correction.clone(),
+            corrections: final_ctx.corrections.clone(),
         }
     }
 }
@@ -550,5 +724,276 @@ mod tests {
         let (matched, corrected) = find_branch_match("unknown", &branches);
         assert_eq!(matched, "unknown");
         assert!(!corrected);
+    }
+
+    // ── find_job_match tests ──
+
+    #[test]
+    fn job_match_exact() {
+        let jobs = vec!["ds-pkg".into(), "backend-api".into()];
+        let (matched, corrected) = find_job_match("ds-pkg", &jobs);
+        assert_eq!(matched, "ds-pkg");
+        assert!(!corrected);
+    }
+
+    #[test]
+    fn job_match_prefix() {
+        let jobs = vec!["ds-package".into(), "backend".into()];
+        let (matched, corrected) = find_job_match("ds", &jobs);
+        assert_eq!(matched, "ds-package");
+        assert!(corrected);
+    }
+
+    #[test]
+    fn job_match_levenshtein_one_insertion() {
+        let jobs = vec!["ds-pkg".into(), "backend".into()];
+        let (matched, corrected) = find_job_match("ds-pk", &jobs);
+        assert_eq!(matched, "ds-pkg");
+        assert!(corrected);
+    }
+
+    #[test]
+    fn job_match_levenshtein_one_substitution() {
+        let jobs = vec!["frontend-app".into(), "backend-api".into()];
+        let (matched, corrected) = find_job_match("backend-apl", &jobs);
+        assert_eq!(matched, "backend-api");
+        assert!(corrected);
+    }
+
+    #[test]
+    fn job_match_beyond_threshold() {
+        let jobs = vec!["alpha".into(), "beta".into()];
+        let (matched, corrected) = find_job_match("gamma", &jobs);
+        assert_eq!(matched, "gamma");
+        assert!(!corrected);
+    }
+
+    #[test]
+    fn job_match_empty_list() {
+        let jobs: Vec<String> = vec![];
+        let (matched, corrected) = find_job_match("anything", &jobs);
+        assert_eq!(matched, "anything");
+        assert!(!corrected);
+    }
+
+    // ── parse_simple integration tests ──
+
+    async fn make_router_with_mock_cache() -> IntentRouter {
+        use crate::tools::jenkins_cache::{CachedJob, JenkinsCache};
+
+        let cache_data = JenkinsCache {
+            jobs: vec![CachedJob {
+                name: "ds-pkg".into(),
+                job_type: "pipeline_multibranch".into(),
+                url: "http://jenkins/job/ds-pkg".into(),
+                branches: vec!["dev".into(), "main".into(), "feature/x".into()],
+            }],
+            last_refresh: "now".into(),
+        };
+
+        let cache_mgr = crate::tools::jenkins_cache::JenkinsCacheManager::new(
+            crate::config::Config::test_default(),
+        );
+        {
+            let rw = cache_mgr.cache();
+            let mut guard = rw.write().await;
+            *guard = Some(cache_data);
+        }
+        IntentRouter::new(std::sync::Arc::new(cache_mgr))
+    }
+
+    #[tokio::test]
+    async fn identify_ds_pkg_dev_exact_match() {
+        let router = make_router_with_mock_cache().await;
+        let (intent, correction) = router.identify("部署 ds-pkg/dev").await;
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pkg".into()));
+        assert_eq!(branch, Some("dev".into()));
+        assert!(correction.is_empty(), "精确匹配不应有修正");
+    }
+
+    #[tokio::test]
+    async fn identify_ds_pkg_de_branch_corrected() {
+        let router = make_router_with_mock_cache().await;
+        let (intent, correction) = router.identify("部署 ds-pkg/de").await;
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pkg".into()));
+        assert_eq!(branch, Some("dev".into()));
+        assert!(!correction.is_empty(), "分支 'de' 应该被修正为 'dev'");
+    }
+
+    #[tokio::test]
+    async fn identify_ds_pk_de_both_corrected() {
+        let router = make_router_with_mock_cache().await;
+        let (intent, correction) = router.identify("部署 ds-pk/de").await;
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pkg".into()));
+        assert_eq!(branch, Some("dev".into()));
+        assert!(
+            !correction.is_empty(),
+            "job 'ds-pk' 和分支 'de' 都应该被修正"
+        );
+    }
+
+    #[tokio::test]
+    async fn identify_ds_pkg_dev_space_separated() {
+        let router = make_router_with_mock_cache().await;
+        let (intent, correction) = router.identify("部署 ds-pkg dev").await;
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pkg".into()));
+        assert_eq!(branch, Some("dev".into()));
+        assert!(correction.is_empty(), "精确匹配不应有修正");
+    }
+
+    #[tokio::test]
+    async fn identify_ds_pk_space_de_both_corrected() {
+        let router = make_router_with_mock_cache().await;
+        let (intent, correction) = router.identify("部署 ds-pk de").await;
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pkg".into()));
+        assert_eq!(branch, Some("dev".into()));
+        assert!(!correction.is_empty(), "job 和分支都应该被修正");
+    }
+
+    // ── 步骤链一致性：三个关键词组必须生成相同的步骤链 ──
+
+    #[tokio::test]
+    async fn step_chain_consistency_three_variants() {
+        use crate::agent::chain_mapping::to_chain_with_prompt;
+
+        let router = make_router_with_mock_cache().await;
+
+        // 解析三个关键词组
+        let (intent_exact, _c1) = router.identify("部署 ds-pkg/dev").await;
+        let (intent_branch_fix, _c2) = router.identify("部署 ds-pkg/de").await;
+        let (intent_both_fix, _c3) = router.identify("部署 ds-pk/de").await;
+
+        // 三个 intent 必须完全等价（job, branch, action, job_type）
+        let (job1, branch1) = crate::agent::intent::extract_fields(&intent_exact);
+        let (job2, branch2) = crate::agent::intent::extract_fields(&intent_branch_fix);
+        let (job3, branch3) = crate::agent::intent::extract_fields(&intent_both_fix);
+
+        assert_eq!(job1, job2, "job 名应一致: ds-pkg/dev vs ds-pkg/de");
+        assert_eq!(job1, job3, "job 名应一致: ds-pkg/dev vs ds-pk/de");
+        assert_eq!(branch1, branch2, "branch 应一致: ds-pkg/dev vs ds-pkg/de");
+        assert_eq!(branch1, branch3, "branch 应一致: ds-pkg/dev vs ds-pk/de");
+
+        // 验证 intent 类型相同（DeployPipeline）
+        assert!(
+            matches!(intent_exact, crate::agent::Intent::DeployPipeline { .. }),
+            "应该是 DeployPipeline"
+        );
+        assert!(
+            matches!(
+                intent_branch_fix,
+                crate::agent::Intent::DeployPipeline { .. }
+            ),
+            "应该是 DeployPipeline"
+        );
+        assert!(
+            matches!(intent_both_fix, crate::agent::Intent::DeployPipeline { .. }),
+            "应该是 DeployPipeline"
+        );
+
+        // 意图等价 → to_chain_with_prompt 生成的步骤链也等价
+        // 因为 chain_mapping 只根据 Intent 枚举类型决定步骤链
+        let _chain1 = to_chain_with_prompt(&intent_exact, "", None, None);
+        let _chain2 = to_chain_with_prompt(&intent_branch_fix, "", None, None);
+        let _chain3 = to_chain_with_prompt(&intent_both_fix, "", None, None);
+    }
+
+    #[tokio::test]
+    async fn step_chain_consistency_query_variants() {
+        use crate::agent::chain_mapping::to_chain_with_prompt;
+
+        let router = make_router_with_mock_cache().await;
+
+        let (intent1, _) = router.identify("查询 ds-pkg/dev").await;
+        let (intent2, _) = router.identify("查询 ds-pkg/de").await;
+        let (intent3, _) = router.identify("查询 ds-pk/de").await;
+
+        let (job1, branch1) = crate::agent::intent::extract_fields(&intent1);
+        let (job2, branch2) = crate::agent::intent::extract_fields(&intent2);
+        let (job3, branch3) = crate::agent::intent::extract_fields(&intent3);
+
+        assert_eq!(job1, job2);
+        assert_eq!(job1, job3);
+        assert_eq!(branch1, branch2);
+        assert_eq!(branch1, branch3);
+
+        // 验证都是 QueryPipeline 类型
+        assert!(
+            matches!(intent1, crate::agent::Intent::QueryPipeline { .. }),
+            "应该是 QueryPipeline"
+        );
+        assert!(
+            matches!(intent2, crate::agent::Intent::QueryPipeline { .. }),
+            "应该是 QueryPipeline"
+        );
+        assert!(
+            matches!(intent3, crate::agent::Intent::QueryPipeline { .. }),
+            "应该是 QueryPipeline"
+        );
+
+        // 步骤链也一致
+        let chain1 = to_chain_with_prompt(&intent1, "", None, None);
+        let chain2 = to_chain_with_prompt(&intent2, "", None, None);
+        let chain3 = to_chain_with_prompt(&intent3, "", None, None);
+        assert!(
+            std::mem::discriminant(&intent1) == std::mem::discriminant(&intent2)
+                && std::mem::discriminant(&intent1) == std::mem::discriminant(&intent3),
+            "三个 query intent 类型必须相同"
+        );
+        drop(chain1);
+        drop(chain2);
+        drop(chain3);
+    }
+
+    // ── 缓存未命中时，action 仍由 parse_simple 决定（不被 LLM 覆盖） ──
+
+    async fn make_router_with_empty_cache() -> IntentRouter {
+        let cache_mgr = crate::tools::jenkins_cache::JenkinsCacheManager::new(
+            crate::config::Config::test_default(),
+        );
+        // 缓存保持为空（不注入数据）
+        IntentRouter::new(std::sync::Arc::new(cache_mgr))
+    }
+
+    #[tokio::test]
+    async fn cache_miss_preserves_action_deploy() {
+        let router = make_router_with_empty_cache().await;
+        let (intent, _correction) = router.identify("部署 ds-pkg/de").await;
+        // 即使缓存为空，action 必须是 deploy，不能变成 query
+        assert!(
+            matches!(intent, crate::agent::Intent::DeployPipeline { .. }),
+            "缓存未命中时应保留 deploy action，实际: {:?}",
+            std::mem::discriminant(&intent)
+        );
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pkg".into()));
+        assert_eq!(branch, Some("de".into()));
+    }
+
+    #[tokio::test]
+    async fn cache_miss_preserves_action_query() {
+        let router = make_router_with_empty_cache().await;
+        let (intent, _) = router.identify("查询 ds-pkg/de").await;
+        assert!(
+            matches!(intent, crate::agent::Intent::QueryPipeline { .. }),
+            "缓存未命中时应保留 query action"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_miss_ds_pk_de_still_deploy() {
+        let router = make_router_with_empty_cache().await;
+        let (intent, _) = router.identify("部署 ds-pk/de").await;
+        assert!(
+            matches!(intent, crate::agent::Intent::DeployPipeline { .. }),
+            "缓存未命中时应保留 deploy action"
+        );
+        let (job, branch) = crate::agent::intent::extract_fields(&intent);
+        assert_eq!(job, Some("ds-pk".into()));
+        assert_eq!(branch, Some("de".into()));
     }
 }

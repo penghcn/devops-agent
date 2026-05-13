@@ -45,8 +45,8 @@ pub struct StepContext {
     pub step_elapsed: Vec<f64>,
     /// identify() 中 Claude 调用的耗时（秒），StepChain 执行时加到第一步
     pub identify_elapsed: Option<f64>,
-    /// 分支名模糊修正提示，如 "原始分支 'de5' 已修正为 'dev'"
-    pub branch_correction: Option<String>,
+    /// 模糊修正列表（job/branch）
+    pub corrections: Vec<super::Correction>,
     /// LLM provider passed from IntentRouter for step use
     pub llm_provider: Option<Arc<dyn LlmProvider>>,
     /// LLM model name passed from IntentRouter for step use
@@ -76,7 +76,7 @@ impl StepContext {
             steps: Vec::new(),
             step_elapsed: Vec::new(),
             identify_elapsed: None,
-            branch_correction: None,
+            corrections: Vec::new(),
             llm_provider: None,
             llm_model: None,
         }
@@ -102,8 +102,12 @@ impl StepContext {
         self
     }
 
-    pub fn with_branch_correction(mut self, correction: String) -> Self {
-        self.branch_correction = Some(correction);
+    pub fn add_correction(mut self, kind: String, original: String, corrected: String) -> Self {
+        self.corrections.push(super::Correction {
+            kind,
+            original,
+            corrected,
+        });
         self
     }
 }
@@ -160,6 +164,73 @@ impl StepChain {
             last.elapsed = Some(total_elapsed);
 
             final_steps = ctx.steps.clone();
+
+            if result.is_abort() || !result.is_success() {
+                break;
+            }
+        }
+
+        (ctx, final_steps)
+    }
+
+    /// 流式执行 — 每个 Step 完成后通过 channel 推送事件
+    pub async fn execute_stream(
+        &self,
+        ctx: StepContext,
+        sender: tokio::sync::mpsc::Sender<super::StreamEvent>,
+    ) -> (StepContext, Vec<super::AgentStep>) {
+        let mut ctx = ctx;
+        let mut final_steps = Vec::new();
+
+        for (i, step) in self.steps.iter().enumerate() {
+            let step_name = step.name().to_string();
+            let start = std::time::Instant::now();
+
+            ctx.steps.push(super::AgentStep {
+                action: step_name.clone(),
+                result: "执行中...".to_string(),
+                elapsed: None,
+            });
+
+            // 推送 StepStart
+            let _ = sender
+                .send(super::StreamEvent::StepStart {
+                    step_index: i,
+                    action: step_name.clone(),
+                })
+                .await;
+
+            let result = step.execute(&mut ctx).await;
+            let elapsed = start.elapsed().as_millis() as f64 / 1000.0;
+
+            // 第一步累加 identify() 的耗时
+            let total_elapsed = if i == 0 {
+                ctx.identify_elapsed.map(|e| e + elapsed).unwrap_or(elapsed)
+            } else {
+                elapsed
+            };
+
+            // 更新 result 并回填 elapsed
+            let step_result = match &result {
+                StepResult::Success { message } => message.clone(),
+                StepResult::Failed { error } => format!("失败: {}", error),
+                StepResult::Abort { reason } => format!("中止: {}", reason),
+            };
+            let last = ctx.steps.last_mut().unwrap();
+            last.result = step_result.clone();
+            last.elapsed = Some(total_elapsed);
+
+            final_steps = ctx.steps.clone();
+
+            // 推送 StepDone
+            let _ = sender
+                .send(super::StreamEvent::StepDone {
+                    step_index: i,
+                    action: step_name,
+                    result: step_result,
+                    elapsed: total_elapsed,
+                })
+                .await;
 
             if result.is_abort() || !result.is_success() {
                 break;

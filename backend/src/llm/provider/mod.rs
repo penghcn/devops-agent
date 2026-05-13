@@ -2,8 +2,8 @@
 
 pub mod anthropic;
 pub mod base;
+pub mod client;
 pub mod config;
-pub mod http_client;
 pub mod openai;
 pub use anthropic::{AnthropicAdapter, AnthropicProvider};
 pub use base::{BaseConfig, GenericProvider, ProviderAdapter};

@@ -1,18 +1,20 @@
+use crate::agent::{AgentRequest, AgentResponse, StreamEvent};
+use crate::config::Config;
+use crate::llm::LlmConfigStore;
+use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 use axum::{
     Json, Router,
     body::Body,
     http::{Request, StatusCode},
+    response::sse::{Event, Sse},
     routing::{get, post},
     serve,
 };
+use futures::Stream;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::{Any, CorsLayer};
-
-use crate::agent::{AgentRequest, AgentResponse};
-use crate::config::Config;
-use crate::llm::LlmConfigStore;
-use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -31,6 +33,7 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
     let port = state.config.backend_port;
     let app = Router::new()
         .route("/api/agent", post(handle_agent))
+        .route("/api/agent/stream", post(handle_agent_stream))
         .route("/api/cache", get(handle_cache))
         .route("/api/llm/config", get(handle_get_llm_config))
         .layer(cors)
@@ -63,6 +66,149 @@ async fn handle_agent(
     )
     .await;
     Ok(Json(response))
+}
+
+/// SSE 流式 Agent 处理 — 每个 Step 完成后立即推送
+async fn handle_agent_stream(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: Request<Body>,
+) -> Result<Sse<impl Stream<Item = Result<Event, axum::http::Error>>>, StatusCode> {
+    check_api_key(&state.config, &req)?;
+
+    let body = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024)
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let req: AgentRequest = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let config = state.config.clone();
+    let cache_manager = state.cache_manager.clone();
+    let llm_config_store = state.llm_config_store.clone();
+
+    // Internal channel: Step events
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<StreamEvent>(32);
+    let event_tx = Arc::new(event_tx);
+    // External channel: SSE Events
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Result<Event, axum::http::Error>>(32);
+
+    // Forwarder: convert StreamEvent → SSE Event
+    tokio::spawn(async move {
+        let mut rx = event_rx;
+        while let Some(event) = rx.recv().await {
+            let data = serde_json::to_string(&event).unwrap_or_default();
+            if sse_tx.send(Ok(Event::default().data(data))).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let tx_clone = event_tx.clone();
+    tokio::spawn(async move {
+        let response =
+            process_request_stream(req, &config, cache_manager, &llm_config_store, tx_clone).await;
+
+        let success = response
+            .steps
+            .last()
+            .map(|step| {
+                step.result.contains("成功")
+                    && !step.result.contains("失败")
+                    && !step.result.contains("中止")
+            })
+            .unwrap_or(false);
+
+        let output = response
+            .steps
+            .iter()
+            .find(|step| step.result.contains("失败") || step.result.contains("中止"))
+            .map(|step| step.result.clone())
+            .unwrap_or_else(|| "处理完成".to_string());
+
+        let _ = event_tx
+            .send(StreamEvent::Complete {
+                success,
+                output,
+                structured_output: response.structured_output,
+                steps: response.steps,
+                corrections: response.corrections,
+            })
+            .await;
+    });
+
+    let stream = ReceiverStream::new(sse_rx);
+    Ok(Sse::new(stream))
+}
+
+async fn process_request_stream(
+    req: AgentRequest,
+    config: &Config,
+    cache: Arc<JenkinsCacheManager>,
+    store: &LlmConfigStore,
+    sender: Arc<tokio::sync::mpsc::Sender<StreamEvent>>,
+) -> AgentResponse {
+    let llm_provider = store.build_router();
+    let default_model = store.snapshot().default_model_flash();
+
+    let intent_router = if let Some(ref provider) = llm_provider {
+        crate::agent::IntentRouter::with_llm(
+            cache.clone(),
+            provider.clone(),
+            default_model.as_deref().unwrap_or("gpt-4o-mini"),
+        )
+    } else {
+        crate::agent::IntentRouter::new(cache)
+    };
+
+    let (intent, corrections) = intent_router.identify(&req.prompt).await;
+
+    let chain = crate::agent::chain_mapping::to_chain_with_prompt(
+        &intent,
+        &req.prompt,
+        llm_provider.clone(),
+        default_model.clone(),
+    );
+
+    let (job_name, branch) = crate::agent::intent::extract_fields(&intent);
+
+    let mut ctx = if let Some(provider) = llm_provider {
+        let model = default_model.unwrap_or_else(|| "gpt-4o-mini".to_string());
+        crate::agent::StepContext::new(
+            req.prompt.clone(),
+            req.task_type,
+            job_name,
+            branch,
+            Arc::new(config.clone()),
+        )
+        .with_cache(intent_router.cache().clone())
+        .with_llm_provider(provider)
+        .with_llm_model(model)
+    } else {
+        crate::agent::StepContext::new(
+            req.prompt.clone(),
+            req.task_type,
+            job_name,
+            branch,
+            Arc::new(config.clone()),
+        )
+        .with_cache(intent_router.cache().clone())
+    };
+
+    for c in &corrections {
+        ctx = ctx.add_correction(c.kind.clone(), c.original.clone(), c.corrected.clone());
+    }
+
+    // execute_stream needs Sender, not Arc<Sender> — clone from Arc
+    let sender_inner = (*sender).clone();
+    let (final_ctx, _steps) = chain.execute_stream(ctx, sender_inner).await;
+
+    let structured_output = final_ctx.structured_analysis.clone();
+
+    AgentResponse {
+        success: true,
+        output: "".to_string(),
+        structured_output,
+        steps: final_ctx.steps,
+        corrections: final_ctx.corrections.clone(),
+    }
 }
 
 async fn handle_cache(

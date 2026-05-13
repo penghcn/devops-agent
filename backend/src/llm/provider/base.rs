@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use super::http_client::http_call;
+use super::client::http_call;
 use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider};
 
 /// 公共 LLM 配置

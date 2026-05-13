@@ -27,7 +27,11 @@ pub async fn http_call(
     provider_id: &str,
     configure: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
 ) -> Result<HttpResponse, LlmError> {
-    let request_id = format!("req-{}", chrono::Local::now().timestamp_millis());
+    let request_id = format!(
+        "req-{}-{}",
+        chrono::Local::now().timestamp_millis(),
+        yunli::util::generate_nonce_ascii_str(8)
+    );
 
     tracing::info!(
         request_id = %request_id,

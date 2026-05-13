@@ -27,6 +27,8 @@ tracing-subscriber = { version = "0.3", features = ["local-time", "time"] }
 dotenv = "0.15"       # 环境变量
 reqwest = { version = "0.12", features = ["json"] }  # HTTP 客户端
 tokio-util = "0.7"    # 异步运行时工具
+futures = "0.3"       # SSE 流式响应
+tokio-stream = "0.1"  # SSE ReceiverStream
 base64 = "0.22"       # Jenkins Basic Auth
 uuid = { version = "1", features = ["v4"] }  # Session IDs
 rusqlite = { version = "0.39", features = ["bundled"] }  # SQLite 持久化

@@ -11,12 +11,38 @@ export interface AgentStep {
   elapsed?: number
 }
 
+export interface Correction {
+  kind: string
+  original: string
+  corrected: string
+}
+
 export interface AgentResponse {
   success: boolean
   output: string
   steps: AgentStep[]
   structured_output?: Record<string, any>
-  branch_correction?: string
+  corrections?: Correction[]
+}
+
+export type StreamEventType =
+  | 'StepStart'
+  | 'StepDone'
+  | 'BranchCorrection'
+  | 'Complete'
+
+export interface StreamEvent {
+  type: StreamEventType
+  step_index?: number
+  action?: string
+  result?: string
+  elapsed?: number
+  message?: string
+  success?: boolean
+  output?: string
+  steps?: AgentStep[]
+  structured_output?: Record<string, any>
+  corrections?: Correction[]
 }
 
 export interface JenkinsCache {
@@ -30,6 +56,6 @@ export interface ChatMessage {
   agent: string
   steps: AgentStep[]
   structured_output?: Record<string, any>
-  branch_correction?: string
+  corrections?: Correction[]
   _elapsed?: number
 }

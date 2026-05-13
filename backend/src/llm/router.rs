@@ -170,10 +170,19 @@ impl ModelRouter {
     /// Find provider by model name — matches against registered models.
     fn find_provider_by_model(&self, model: &str) -> Option<Arc<dyn LlmProvider>> {
         for (_, provider, models) in &self.providers {
-            if models.model_flash.as_deref() == Some(model)
-                || models.model_pro.as_deref() == Some(model)
-                || models.default_model.as_deref() == Some(model)
-            {
+            let matched = models
+                .model_flash
+                .as_ref()
+                .is_some_and(|m| m.starts_with(model))
+                || models
+                    .model_pro
+                    .as_ref()
+                    .is_some_and(|m| m.starts_with(model))
+                || models
+                    .default_model
+                    .as_ref()
+                    .is_some_and(|m| m.starts_with(model));
+            if matched {
                 return Some(provider.clone());
             }
         }
