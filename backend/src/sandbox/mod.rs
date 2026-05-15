@@ -1,7 +1,14 @@
+pub mod factory;
+#[cfg(target_os = "linux")]
+pub mod microsandbox_backend;
+pub mod process_backend;
+pub mod process_sandbox;
+pub mod trait_sandbox;
+
+// 保留原有模块作为降级方案的内部实现
 pub mod fs_isolation;
 pub mod network_whitelist;
 pub mod path_check;
-pub mod process_sandbox;
 
 use std::fmt;
 
@@ -37,6 +44,12 @@ impl fmt::Display for SandboxError {
 
 impl std::error::Error for SandboxError {}
 
+// 新抽象层导出
+pub use factory::{MicrosandboxConfig, SandboxBackend, SandboxFactory};
+pub use process_backend::ProcessBackend;
+pub use trait_sandbox::{ExecResult, Sandbox};
+
+// 保留旧导出以兼容现有代码
 pub use fs_isolation::{FileSystemIsolator, FsIsolationConfig};
 pub use network_whitelist::{NetworkCheckResult, NetworkWhitelist};
 pub use path_check::{PathValidation, PathValidator};

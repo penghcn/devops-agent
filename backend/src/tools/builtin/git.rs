@@ -1,24 +1,34 @@
-use crate::sandbox::ProcessSandbox;
+use crate::sandbox::{Sandbox, SandboxFactory};
 use crate::security::policy::PolicyEngine;
 use crate::security::roles::{PolicyDecision, Role, ToolName, ToolRequest};
+use std::sync::Arc;
 
 use super::{Tool, ToolInput, ToolOutput};
 
 /// Git 操作封装工具
 pub struct GitTool {
-    sandbox: ProcessSandbox,
+    sandbox: Arc<dyn Sandbox>,
     policy_engine: PolicyEngine,
     /// 禁止的 git 子命令
     denied_commands: Vec<String>,
 }
 
 impl GitTool {
-    pub fn new(sandbox: ProcessSandbox, policy_engine: PolicyEngine) -> Self {
+    pub fn new(sandbox: Arc<dyn Sandbox>, policy_engine: PolicyEngine) -> Self {
         Self {
             sandbox,
             policy_engine,
             denied_commands: default_denied_commands(),
         }
+    }
+
+    /// 从工厂创建 GitTool（便捷方法）
+    pub fn from_factory(
+        factory: &SandboxFactory,
+        policy_engine: PolicyEngine,
+    ) -> anyhow::Result<Self> {
+        let sandbox = factory.create()?;
+        Ok(Self::new(sandbox, policy_engine))
     }
 }
 
@@ -81,23 +91,20 @@ impl Tool for GitTool {
         }
 
         // 执行 git 命令
-        let result = match self.sandbox.execute_async("git", &git_args).await {
+        let result = match self.sandbox.exec("git", &git_args).await {
             Ok(r) => r,
             Err(e) => {
                 return ToolOutput::fail(format!("git 执行失败: {}", e));
             }
         };
 
-        let success = !result.timed_out && result.exit_code == 0;
-        let mut output = result.stdout;
-        if result.truncated {
-            output.push_str(" [...truncated]");
-        }
+        let success = result.exit_code == 0;
+        let output = result.stdout;
 
-        let error = if result.timed_out {
-            Some("git 命令执行超时".into())
-        } else if !result.stderr.is_empty() {
+        let error = if !result.stderr.is_empty() {
             Some(result.stderr)
+        } else if !success {
+            Some(format!("exit code: {}", result.exit_code))
         } else {
             None
         };
@@ -105,7 +112,7 @@ impl Tool for GitTool {
         if success {
             ToolOutput::success(output)
         } else {
-            ToolOutput::fail(error.unwrap_or_else(|| format!("exit code: {}", result.exit_code)))
+            ToolOutput::fail(error.unwrap_or_default())
         }
     }
 }

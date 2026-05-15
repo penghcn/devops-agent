@@ -36,11 +36,15 @@ backend/src/
 │   ├── policy.rs              # 策略引擎：ALLOW/DENY/PROMPT
 │   └── audit.rs               # 操作审计日志
 │
-├── sandbox/                   # 沙箱隔离
+├── sandbox/                   # 沙箱隔离（分层架构）
 │   ├── mod.rs
+│   ├── trait_sandbox.rs       # Sandbox trait + ExecResult 统一接口
+│   ├── process_backend.rs     # ProcessBackend：适配现有进程沙箱（降级方案）
+│   ├── microsandbox_backend.rs # MicrosandboxBackend：基于 microsandbox SDK（Linux）
+│   ├── factory.rs             # SandboxFactory：环境变量自动选择后端
+│   ├── process_sandbox.rs     # 进程限制 + 环境净化（底层实现）
 │   ├── path_check.rs          # 路径穿越检测
 │   ├── fs_isolation.rs        # 文件系统隔离 + 选择性挂载
-│   ├── process_sandbox.rs     # 进程限制 + 环境净化
 │   └── network_whitelist.rs   # 网络白名单
 │
 ├── tools/                     # 工具集

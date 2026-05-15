@@ -1,5 +1,5 @@
 use devops_agent::sandbox::{
-    FileSystemIsolator, FsIsolationConfig, NetworkWhitelist, PathValidator, ProcessSandbox,
+    FileSystemIsolator, FsIsolationConfig, NetworkWhitelist, PathValidator, ProcessBackend, Sandbox,
 };
 use devops_agent::security::audit::AuditLog;
 use devops_agent::security::policy::PolicyEngine;
@@ -19,7 +19,7 @@ struct TestFixture {
     pub output_dir: PathBuf,
     pub validator: PathValidator,
     pub isolator: FileSystemIsolator,
-    pub sandbox: ProcessSandbox,
+    pub sandbox: Arc<dyn Sandbox>,
     pub policy_engine: PolicyEngine,
     pub network_whitelist: NetworkWhitelist,
     #[allow(dead_code)]
@@ -48,7 +48,7 @@ impl TestFixture {
             read_only_mounts: vec![],
         });
 
-        let sandbox = ProcessSandbox::new();
+        let sandbox: Arc<dyn Sandbox> = Arc::new(ProcessBackend::new());
         let audit_log = AuditLog::new();
         let policy_engine = PolicyEngine::new(Arc::new(audit_log));
         let network_whitelist = NetworkWhitelist::new();
