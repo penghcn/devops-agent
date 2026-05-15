@@ -29,16 +29,10 @@ futures = "0.3"       # SSE 流式响应
 tokio-stream = "0.1"  # SSE ReceiverStream
 base64 = "0.22"       # Jenkins Basic Auth
 uuid = { version = "1", features = ["v4"] }  # Session IDs
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite"] }  # SQLite 持久化
-
-[target.'cfg(target_os = "linux")'.dependencies]
-microsandbox = "0.4"     # 沙箱 SDK（仅 Linux，macOS x86_64 有上游编译 bug）
+rusqlite = { version = "0.39", features = ["bundled"] }  # SQLite 持久化
+microsandbox = "0.4"       # 代码沙箱执行
 
 [dev-dependencies]
 ctor = "0.2"
 anyhow = "1"
 tempfile = "3"
-
-#使用一个临时的 Ad-hoc 签名
-[package.metadata.build]
-post-build = "codesign --force --sign - target/debug/devops-agent"
