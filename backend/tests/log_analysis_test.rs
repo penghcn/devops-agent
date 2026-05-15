@@ -3,11 +3,6 @@ use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
 use std::sync::Arc;
 
-#[ctor::ctor]
-fn init_env() {
-    dotenv::dotenv().ok();
-}
-
 /// 测试 JenkinsLogStep 缺少 job_name 时中止
 #[tokio::test]
 async fn test_jenkins_log_step_missing_job_name() {

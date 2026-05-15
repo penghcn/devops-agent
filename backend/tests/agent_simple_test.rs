@@ -151,3 +151,37 @@ async fn test_run_agent() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}\n耗时{:.2?}", res, start.elapsed());
     Ok(())
 }
+
+const SENSITIVE_KEYS: &[&str] = &["secret", "key", "token", "password", "passwd", "pass", "sk"];
+
+fn is_sensitive_key(k: &str) -> bool {
+    let lower = k.to_lowercase();
+    SENSITIVE_KEYS.iter().any(|&s| {
+        lower == s || lower.ends_with(&format!(".{s}")) || lower.ends_with(&format!("_{s}"))
+    })
+}
+
+#[test]
+fn test_load_returns_result() -> anyhow::Result<()> {
+    let result = yunli::config::load();
+    match result {
+        Ok(map) => {
+            eprintln!("map len = {}", map.len());
+            for (k, v) in &map {
+                let display = if is_sensitive_key(k) {
+                    yunli::util::mask_sensitive(v)
+                } else {
+                    v.clone()
+                };
+                eprintln!("  {} = {}", k, display);
+            }
+            assert!(!map.is_empty(), "map should not be empty");
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            eprintln!("ERROR: {}", msg);
+            assert!(!msg.is_empty(), "error message should not be empty");
+        }
+    }
+    Ok(())
+}

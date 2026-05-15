@@ -5,11 +5,6 @@ use devops_agent::tools::jenkins;
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
-#[ctor::ctor]
-fn init_env() {
-    dotenv::dotenv().ok();
-}
-
 /// 测试 StepContext 创建
 #[tokio::test]
 async fn test_step_context_creation() {

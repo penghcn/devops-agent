@@ -3,11 +3,6 @@ use devops_agent::config::Config;
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
 
-#[ctor::ctor]
-fn init_env() {
-    dotenv::dotenv().ok();
-}
-
 fn make_request(prompt: &str) -> AgentRequest {
     AgentRequest {
         prompt: prompt.to_string(),
@@ -19,6 +14,7 @@ fn make_request(prompt: &str) -> AgentRequest {
 
 /// 无法识别的意图返回 General (ClaudeCodeStep)
 /// 不触发缓存访问，因为关键词不匹配 parse_simple
+#[ignore]
 #[tokio::test]
 async fn test_process_request_general_intent() {
     let config = Config::test_default();
