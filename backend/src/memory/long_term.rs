@@ -10,14 +10,14 @@ pub struct LongTermMemory {
 
 impl LongTermMemory {
     /// 创建长期记忆实例，连接到指定路径的 SQLite 数据库
-    pub fn new(path: &str) -> Result<Self> {
-        let store = MemoryStore::new(path)?;
+    pub async fn new(path: &str) -> Result<Self> {
+        let store = MemoryStore::new(path).await?;
         Ok(Self { store })
     }
 
     /// 保存记忆条目到长期存储
-    pub fn save(
-        &mut self,
+    pub async fn save(
+        &self,
         content: &str,
         _type: MemoryType,
         keywords: &[&str],
@@ -32,12 +32,14 @@ impl LongTermMemory {
             MemoryType::Summary => "Summary",
         };
 
-        self.store.insert(content, type_str, keywords, score)?;
+        self.store
+            .insert(content, type_str, keywords, score)
+            .await?;
         Ok(())
     }
 
     /// 按关键词检索长期记忆
-    pub fn retrieve(&self, keyword: &str) -> Result<Vec<String>> {
-        Ok(self.store.search(keyword)?)
+    pub async fn retrieve(&self, keyword: &str) -> Result<Vec<String>> {
+        Ok(self.store.search(keyword).await?)
     }
 }

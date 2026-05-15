@@ -1,16 +1,16 @@
-use rusqlite::{Connection, Result};
+use sqlx::{Row, SqlitePool};
 
 /// SQLite 记忆存储层，负责数据库操作
 #[derive(Debug)]
 pub struct MemoryStore {
-    conn: Connection,
+    pool: SqlitePool,
 }
 
 impl MemoryStore {
     /// 创建或打开 SQLite 数据库，初始化 memories 表
-    pub fn new(path: &str) -> Result<Self> {
-        let conn = Connection::open(path)?;
-        conn.execute_batch(
+    pub async fn new(path: &str) -> sqlx::Result<Self> {
+        let pool = SqlitePool::connect(path).await?;
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT NOT NULL,
@@ -19,50 +19,60 @@ impl MemoryStore {
                 score REAL NOT NULL DEFAULT 1.0,
                 created_at TEXT NOT NULL
             )",
-        )?;
-        Ok(Self { conn })
+        )
+        .execute(&pool)
+        .await?;
+        Ok(Self { pool })
     }
 
     /// 插入记忆条目
-    pub fn insert(&self, content: &str, type_: &str, keywords: &[&str], score: f64) -> Result<i64> {
+    pub async fn insert(
+        &self,
+        content: &str,
+        type_: &str,
+        keywords: &[&str],
+        score: f64,
+    ) -> sqlx::Result<i64> {
         let keywords_str = keywords.join(",");
         let created_at = chrono::Local::now().to_rfc3339();
 
-        self.conn.execute(
+        let result = sqlx::query(
             "INSERT INTO memories (content, type, keywords, score, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&content, &type_, &keywords_str, score, &created_at),
-        )?;
+        )
+        .bind(content)
+        .bind(type_)
+        .bind(keywords_str)
+        .bind(score)
+        .bind(created_at)
+        .execute(&self.pool)
+        .await?;
 
-        Ok(self.conn.last_insert_rowid())
+        Ok(result.last_insert_rowid())
     }
 
     /// 按关键词 LIKE 搜索，按 score 降序排序，最多返回 20 条
-    pub fn search(&self, keyword: &str) -> Result<Vec<String>> {
+    pub async fn search(&self, keyword: &str) -> sqlx::Result<Vec<String>> {
         let pattern = format!("%{}%", keyword);
-        let mut stmt = self.conn.prepare(
+        let rows = sqlx::query(
             "SELECT content FROM memories
              WHERE keywords LIKE ?1
              ORDER BY score DESC
              LIMIT 20",
-        )?;
+        )
+        .bind(&pattern)
+        .map(|row: sqlx::sqlite::SqliteRow| row.get(0))
+        .fetch_all(&self.pool)
+        .await?;
 
-        let mut rows = stmt.query([&pattern])?;
-        let mut results = Vec::new();
-
-        while let Some(row) = rows.next()? {
-            let content: String = row.get(0)?;
-            results.push(content);
-        }
-
-        Ok(results)
+        Ok(rows)
     }
 
     /// 返回总条目数
-    pub fn count(&self) -> Result<i64> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
-        Ok(count)
+    pub async fn count(&self) -> sqlx::Result<i64> {
+        let row = sqlx::query("SELECT COUNT(*) FROM memories")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get(0))
     }
 }
