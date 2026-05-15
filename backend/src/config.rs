@@ -24,6 +24,11 @@ pub struct Config {
     pub claude_code_path: String,
     pub cors_origins: Vec<String>,
     pub api_key: Option<String>,
+    pub sandbox_backend: String,
+    pub sandbox_timeout_secs: u64,
+    pub sandbox_image: String,
+    pub sandbox_cpus: u32,
+    pub sandbox_memory: u64,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -147,6 +152,29 @@ impl Config {
         // Providers
         let llm_providers = extract_providers(&conf);
 
+        // Sandbox
+        let sandbox_backend = conf
+            .get("sandbox.backend")
+            .map(|s| s.as_str())
+            .unwrap_or("microsandbox")
+            .to_string();
+        let sandbox_timeout_secs = conf
+            .get("sandbox.timeout_secs")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(30);
+        let sandbox_image = conf
+            .get("sandbox.microsandbox.image")
+            .cloned()
+            .unwrap_or_else(|| "debian".to_string());
+        let sandbox_cpus = conf
+            .get("sandbox.microsandbox.cpus")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        let sandbox_memory = conf
+            .get("sandbox.microsandbox.memory")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(512);
+
         let config = Self {
             log_level,
             llm_providers,
@@ -161,6 +189,11 @@ impl Config {
             claude_code_path,
             cors_origins,
             api_key,
+            sandbox_backend,
+            sandbox_timeout_secs,
+            sandbox_image,
+            sandbox_cpus,
+            sandbox_memory,
         };
 
         config.validate_llm()
@@ -202,6 +235,11 @@ impl Config {
             default_provider: "openai".to_string(),
             cors_origins: vec!["http://localhost:3000".to_string()],
             api_key: None,
+            sandbox_backend: "process".to_string(),
+            sandbox_timeout_secs: 30,
+            sandbox_image: "debian".to_string(),
+            sandbox_cpus: 1,
+            sandbox_memory: 512,
         }
     }
 }

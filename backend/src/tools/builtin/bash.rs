@@ -1,19 +1,20 @@
-use crate::sandbox::{NetworkCheckResult, NetworkWhitelist, ProcessSandbox};
+use crate::sandbox::{NetworkCheckResult, NetworkWhitelist, Sandbox, SandboxFactory};
 use crate::security::policy::PolicyEngine;
 use crate::security::roles::{PolicyDecision, ToolName, ToolRequest};
+use std::sync::Arc;
 
 use super::{Tool, ToolInput, ToolOutput};
 
-/// 基于进程沙箱的命令执行工具
+/// 基于沙箱的命令执行工具
 pub struct BashTool {
-    sandbox: ProcessSandbox,
+    sandbox: Arc<dyn Sandbox>,
     network_check: NetworkWhitelist,
     policy_engine: PolicyEngine,
 }
 
 impl BashTool {
     pub fn new(
-        sandbox: ProcessSandbox,
+        sandbox: Arc<dyn Sandbox>,
         network_check: NetworkWhitelist,
         policy_engine: PolicyEngine,
     ) -> Self {
@@ -22,6 +23,16 @@ impl BashTool {
             network_check,
             policy_engine,
         }
+    }
+
+    /// 从工厂创建 BashTool（便捷方法）
+    pub fn from_factory(
+        factory: &SandboxFactory,
+        network_check: NetworkWhitelist,
+        policy_engine: PolicyEngine,
+    ) -> anyhow::Result<Self> {
+        let sandbox = factory.create()?;
+        Ok(Self::new(sandbox, network_check, policy_engine))
     }
 }
 
@@ -73,23 +84,20 @@ impl Tool for BashTool {
         }
 
         // 执行命令
-        let result = match self.sandbox.execute_async(cmd, &args_slice).await {
+        let result = match self.sandbox.exec(cmd, &args_slice).await {
             Ok(r) => r,
             Err(e) => {
                 return ToolOutput::fail(format!("命令执行失败: {}", e));
             }
         };
 
-        let success = !result.timed_out && result.exit_code == 0;
-        let mut output = result.stdout;
-        if result.truncated {
-            output.push_str(" [...truncated]");
-        }
+        let success = result.exit_code == 0;
+        let output = result.stdout;
 
-        let error = if result.timed_out {
-            Some("命令执行超时".into())
-        } else if !result.stderr.is_empty() {
+        let error = if !result.stderr.is_empty() {
             Some(result.stderr)
+        } else if !success {
+            Some(format!("exit code: {}", result.exit_code))
         } else {
             None
         };
@@ -97,7 +105,7 @@ impl Tool for BashTool {
         if success {
             ToolOutput::success(output)
         } else {
-            ToolOutput::fail(error.unwrap_or_else(|| format!("exit code: {}", result.exit_code)))
+            ToolOutput::fail(error.unwrap_or_default())
         }
     }
 }
