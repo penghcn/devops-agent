@@ -33,6 +33,13 @@ impl Step for ClaudeCodeStep {
         "ClaudeCode"
     }
 
+    fn description(&self, _ctx: &StepContext) -> String {
+        match self.prompt.len() {
+            n if n <= 60 => self.prompt.clone(),
+            _ => format!("AI 处理: {}", &self.prompt[..60]),
+        }
+    }
+
     async fn execute(&self, _ctx: &mut StepContext) -> StepResult {
         let result = if let Some(provider) = &self.llm_provider {
             let model = self

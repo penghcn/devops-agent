@@ -116,6 +116,10 @@ impl StepContext {
 #[async_trait::async_trait]
 pub trait Step: Send + Sync {
     fn name(&self) -> &str;
+    /// 面向用户的友好描述（默认返回 name）
+    fn description(&self, _ctx: &StepContext) -> String {
+        self.name().to_string()
+    }
     async fn execute(&self, ctx: &mut StepContext) -> StepResult;
 }
 
@@ -193,10 +197,12 @@ impl StepChain {
             });
 
             // 推送 StepStart
+            let desc = step.description(&ctx);
             let _ = sender
                 .send(super::StreamEvent::StepStart {
                     step_index: i,
                     action: step_name.clone(),
+                    description: desc,
                 })
                 .await;
 

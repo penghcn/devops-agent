@@ -21,6 +21,19 @@ impl Step for JenkinsWaitStep {
         "JenkinsWait"
     }
 
+    fn description(&self, ctx: &StepContext) -> String {
+        match (&ctx.job_name, &ctx.branch, ctx.build_number) {
+            (Some(job), Some(branch), Some(num)) => {
+                format!("等待 {}/{}/ 构建 #{} 完成", job, branch, num)
+            }
+            (Some(job), Some(branch), _) => {
+                format!("等待 {}/{} 的构建完成", job, branch)
+            }
+            (Some(job), _, _) => format!("等待 {} 的构建完成", job),
+            _ => "等待构建完成".to_string(),
+        }
+    }
+
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let build_number = match ctx.build_number {
             Some(n) => n,

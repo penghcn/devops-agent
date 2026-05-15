@@ -9,6 +9,14 @@ impl Step for JenkinsStatusStep {
         "JenkinsStatus"
     }
 
+    fn description(&self, ctx: &StepContext) -> String {
+        match (&ctx.job_name, &ctx.branch) {
+            (Some(job), Some(branch)) => format!("查看 {}/{} 的构建状态", job, branch),
+            (Some(job), _) => format!("查看 {} 的构建状态", job),
+            _ => "查看 Jenkins 构建状态".to_string(),
+        }
+    }
+
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let job_name = match &ctx.job_name {
             Some(j) => j.clone(),

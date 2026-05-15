@@ -25,6 +25,10 @@ impl Step for ClaudeAnalyzeStep {
         "ClaudeAnalyze"
     }
 
+    fn description(&self, _ctx: &StepContext) -> String {
+        "AI 分析构建结果".to_string()
+    }
+
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let log = match &ctx.build_log {
             Some(log) if !log.is_empty() => log,

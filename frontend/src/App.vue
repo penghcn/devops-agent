@@ -46,7 +46,7 @@
 
           <!-- Agent 回复 -->
           <div class="flex justify-start">
-            <div class="max-w-[85%] bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+            <div class="max-w-[95%] bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
               <div v-if="msg._elapsed" class="text-xs text-gray-400 mb-1">
                 耗时 {{ formatElapsed(msg._elapsed) }}
               </div>
@@ -200,9 +200,11 @@ async function handleSend() {
         if (!msg) return
 
         switch (event.type) {
-          case 'StepStart':
-            msg.agent = `正在执行: ${event.action || ''}...`
-            break
+          case 'StepStart': {
+          const desc = event.description || event.action || ''
+          msg.agent = desc.endsWith('...') ? desc : `${desc}...`
+          break
+        }
 
           case 'StepDone': {
             // 更新或追加 step

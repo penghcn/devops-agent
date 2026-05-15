@@ -9,6 +9,16 @@ impl Step for JobValidateStep {
         "JobValidate"
     }
 
+    fn description(&self, ctx: &StepContext) -> String {
+        match (&ctx.job_name, &ctx.branch) {
+            (Some(job), Some(branch)) => {
+                format!("校验 Job {} 与分支 {}", job, branch)
+            }
+            (Some(job), _) => format!("校验 Job {}", job),
+            _ => "校验 Jenkins Job".to_string(),
+        }
+    }
+
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let job_name = match &ctx.job_name {
             Some(j) => j.clone(),

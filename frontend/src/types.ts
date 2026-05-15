@@ -35,6 +35,7 @@ export interface StreamEvent {
   type: StreamEventType
   step_index?: number
   action?: string
+  description?: string
   result?: string
   elapsed?: number
   message?: string

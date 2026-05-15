@@ -71,7 +71,11 @@ pub struct AgentStep {
 #[serde(tag = "type")]
 pub enum StreamEvent {
     /// Step 开始执行
-    StepStart { step_index: usize, action: String },
+    StepStart {
+        step_index: usize,
+        action: String,
+        description: String,
+    },
     /// Step 完成
     StepDone {
         step_index: usize,

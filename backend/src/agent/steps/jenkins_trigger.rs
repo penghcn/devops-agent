@@ -10,6 +10,14 @@ impl Step for JenkinsTriggerStep {
         "JenkinsTrigger"
     }
 
+    fn description(&self, ctx: &StepContext) -> String {
+        match (&ctx.job_name, &ctx.branch) {
+            (Some(job), Some(branch)) => format!("触发 {}/{} 构建", job, branch),
+            (Some(job), _) => format!("触发 {} 构建", job),
+            _ => "触发 Jenkins 构建".to_string(),
+        }
+    }
+
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
         let job_name = match &ctx.job_name {
             Some(name) => name.clone(),
