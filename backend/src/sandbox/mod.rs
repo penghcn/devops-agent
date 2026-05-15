@@ -2,6 +2,7 @@ pub mod fs_isolation;
 pub mod network_whitelist;
 pub mod path_check;
 pub mod process_sandbox;
+pub mod trait_sandbox;
 
 use std::fmt;
 
@@ -41,3 +42,4 @@ pub use fs_isolation::{FileSystemIsolator, FsIsolationConfig};
 pub use network_whitelist::{NetworkCheckResult, NetworkWhitelist};
 pub use path_check::{PathValidation, PathValidator};
 pub use process_sandbox::{ProcessResult, ProcessSandbox, ProcessSandboxConfig};
+pub use trait_sandbox::{ExecResult, Sandbox};
