@@ -44,9 +44,7 @@ impl MicrosandboxBackend {
     }
 
     /// 懒初始化沙箱 — 首次调用时创建，后续复用
-    async fn ensure_running(
-        &self,
-    ) -> Result<Arc<micro::Sandbox>, anyhow::Error> {
+    async fn ensure_running(&self) -> Result<Arc<micro::Sandbox>, anyhow::Error> {
         let sb = {
             let mut guard = self.sandbox.write().await;
             if guard.is_some() {
