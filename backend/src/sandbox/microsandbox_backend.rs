@@ -4,6 +4,9 @@ use tokio::sync::RwLock;
 
 use super::trait_sandbox::{ExecResult, Sandbox};
 
+// 避免与 Sandbox trait 命名冲突
+use microsandbox as micro;
+
 /// Microsandbox 后端配置
 #[derive(Clone)]
 pub struct MicrosandboxConfig {
@@ -28,7 +31,7 @@ impl Default for MicrosandboxConfig {
 /// 使用 microsandbox SDK 的 Sandbox 实现
 pub struct MicrosandboxBackend {
     /// 懒初始化：首次 exec 时创建沙箱
-    sandbox: Arc<RwLock<Option<microsandbox::Sandbox>>>,
+    sandbox: Arc<RwLock<Option<micro::Sandbox>>>,
     config: MicrosandboxConfig,
 }
 
@@ -43,7 +46,7 @@ impl MicrosandboxBackend {
     /// 懒初始化沙箱 — 首次调用时创建，后续复用
     async fn ensure_running(
         &self,
-    ) -> Result<Arc<microsandbox::Sandbox>, anyhow::Error> {
+    ) -> Result<Arc<micro::Sandbox>, anyhow::Error> {
         let sb = {
             let mut guard = self.sandbox.write().await;
             if guard.is_some() {
@@ -51,7 +54,7 @@ impl MicrosandboxBackend {
                 Arc::new(sb)
             } else {
                 let name = format!("devops-{}", std::process::id());
-                let sb = microsandbox::Sandbox::builder(&name)
+                let sb = micro::Sandbox::builder(&name)
                     .image(&self.config.image)
                     .cpus(self.config.cpus)
                     .memory(self.config.memory_mib)
