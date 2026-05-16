@@ -12,7 +12,7 @@ name = "devops-agent"
 path = "src/main.rs"
 
 [dependencies]
-yunli = { version ="0.1", features = ["config"] }        
+yunli = { version ="0.1", features = ["config", "hash"] }        
 axum = "0.8"          # Web 框架
 tokio = { version = "1", features = ["full"] }  # 异步运行时
 chrono = { version = "0.4", features = ["serde"] }  # 时间处理
@@ -27,7 +27,6 @@ reqwest = { version = "0.12", features = ["json"] }  # HTTP 客户端
 tokio-util = "0.7"    # 异步运行时工具
 futures = "0.3"       # SSE 流式响应
 tokio-stream = "0.1"  # SSE ReceiverStream
-base64 = "0.22"       # Jenkins Basic Auth
 uuid = { version = "1", features = ["v4"] }  # Session IDs
 rusqlite = { version = "0.39", features = ["bundled"] }  # SQLite 持久化
 microsandbox = "0.4"       # 代码沙箱执行
