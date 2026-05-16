@@ -28,7 +28,6 @@ tokio-util = "0.7"    # 异步运行时工具
 futures = "0.3"       # SSE 流式响应
 tokio-stream = "0.1"  # SSE ReceiverStream
 uuid = { version = "1", features = ["v4"] }  # Session IDs
-rusqlite = { version = "0.39", features = ["bundled"] }  # SQLite 持久化
 microsandbox = "0.4"       # 代码沙箱执行
 
 [dev-dependencies]
