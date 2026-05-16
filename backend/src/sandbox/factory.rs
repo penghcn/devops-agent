@@ -16,6 +16,7 @@ pub enum SandboxBackend {
     Microsandbox,
     CubeSandbox,
     Process,
+    CubeSandbox,
 }
 
 impl SandboxBackend {
@@ -155,6 +156,10 @@ impl SandboxFactory {
             }
             SandboxBackend::Process => {
                 tracing::info!("使用 process 后端（降级）");
+                Ok(Arc::new(ProcessBackend::new()))
+            }
+            SandboxBackend::CubeSandbox => {
+                tracing::info!("CubeSandbox 后端尚未实现，降级为 process 后端");
                 Ok(Arc::new(ProcessBackend::new()))
             }
         }

@@ -24,11 +24,16 @@ pub struct Config {
     pub claude_code_path: String,
     pub cors_origins: Vec<String>,
     pub api_key: Option<String>,
-    pub sandbox_backend: String,
+    pub sandbox_backends: Vec<crate::sandbox::SandboxBackend>,
     pub sandbox_timeout_secs: u64,
     pub sandbox_image: String,
     pub sandbox_cpus: u32,
     pub sandbox_memory: u64,
+    pub cubesandbox_api_url: String,
+    pub cubesandbox_api_key: String,
+    pub cubesandbox_template_id: String,
+    pub cubesandbox_timeout: i32,
+    pub cubesandbox_allow_internet: bool,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -62,6 +67,43 @@ fn parse_cors_origins(conf: &BTreeMap<String, String>, port: u16) -> Vec<String>
     } else {
         origins
     }
+}
+
+/// 从 flat map 中提取 sandbox backend 数组。
+/// yunli 平铺后: sandbox.backend.0, sandbox.backend.1, ...
+/// 也兼容单个 sandbox.backend 字符串。
+fn parse_sandbox_backends(conf: &BTreeMap<String, String>) -> Vec<crate::sandbox::SandboxBackend> {
+    use crate::sandbox::SandboxBackend;
+    let mut backends = Vec::new();
+    let mut i = 0;
+    loop {
+        match conf.get(&format!("sandbox.backend.{}", i)) {
+            Some(v) => {
+                let b = match v.as_str() {
+                    "cubesandbox" => SandboxBackend::CubeSandbox,
+                    "process" => SandboxBackend::Process,
+                    _ => SandboxBackend::Microsandbox,
+                };
+                backends.push(b);
+            }
+            None => break,
+        }
+        i += 1;
+    }
+    if backends.is_empty() {
+        if let Some(v) = conf.get("sandbox.backend") {
+            let b = match v.as_str() {
+                "cubesandbox" => SandboxBackend::CubeSandbox,
+                "process" => SandboxBackend::Process,
+                _ => SandboxBackend::Microsandbox,
+            };
+            backends.push(b);
+        }
+    }
+    if backends.is_empty() {
+        backends.push(SandboxBackend::Microsandbox);
+    }
+    backends
 }
 
 /// 从 flat map 中提取所有 ProviderConfig。
@@ -153,11 +195,7 @@ impl Config {
         let llm_providers = extract_providers(&conf);
 
         // Sandbox
-        let sandbox_backend = conf
-            .get("sandbox.backend")
-            .map(|s| s.as_str())
-            .unwrap_or("microsandbox")
-            .to_string();
+        let sandbox_backends = parse_sandbox_backends(&conf);
         let sandbox_timeout_secs = conf
             .get("sandbox.timeout_secs")
             .and_then(|s| s.parse().ok())
@@ -175,6 +213,22 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(512);
 
+        // CubeSandbox
+        let cubesandbox_api_url =
+            conf_get(&conf, "sandbox.cubesandbox.api_url").unwrap_or_default();
+        let cubesandbox_api_key =
+            conf_get(&conf, "sandbox.cubesandbox.api_key").unwrap_or_else(|| "dummy".to_string());
+        let cubesandbox_template_id =
+            conf_get(&conf, "sandbox.cubesandbox.template_id").unwrap_or_default();
+        let cubesandbox_timeout = conf
+            .get("sandbox.cubesandbox.timeout")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1800i32);
+        let cubesandbox_allow_internet = conf
+            .get("sandbox.cubesandbox.allow_internet")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(true);
+
         let config = Self {
             log_level,
             llm_providers,
@@ -189,11 +243,16 @@ impl Config {
             claude_code_path,
             cors_origins,
             api_key,
-            sandbox_backend,
+            sandbox_backends,
             sandbox_timeout_secs,
             sandbox_image,
             sandbox_cpus,
             sandbox_memory,
+            cubesandbox_api_url,
+            cubesandbox_api_key,
+            cubesandbox_template_id,
+            cubesandbox_timeout,
+            cubesandbox_allow_internet,
         };
 
         config.validate_llm()
@@ -235,11 +294,16 @@ impl Config {
             default_provider: "openai".to_string(),
             cors_origins: vec!["http://localhost:3000".to_string()],
             api_key: None,
-            sandbox_backend: "process".to_string(),
+            sandbox_backends: vec![crate::sandbox::SandboxBackend::Process],
             sandbox_timeout_secs: 30,
             sandbox_image: "debian".to_string(),
             sandbox_cpus: 1,
             sandbox_memory: 512,
+            cubesandbox_api_url: String::new(),
+            cubesandbox_api_key: "dummy".to_string(),
+            cubesandbox_template_id: String::new(),
+            cubesandbox_timeout: 1800,
+            cubesandbox_allow_internet: true,
         }
     }
 }
