@@ -379,7 +379,13 @@ impl Sandbox for CubeSandboxBackend {
 }
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: 编译验证**
+
+```bash
+cd backend && ./run-signed.sh
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add backend/src/sandbox/cubesandbox/backend.rs backend/src/sandbox/cubesandbox/mod.rs
@@ -641,7 +647,7 @@ cubesandbox_timeout: 1800,
 cubesandbox_allow_internet: true,
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add backend/src/config.rs
@@ -650,41 +656,7 @@ git commit -m "feat(config): 添加 CubeSandbox 配置字段"
 
 ---
 
-### Task 6: 在 main.rs 中调用 Factory init()
-
-**Files:**
-- Modify: `backend/src/main.rs`
-- Modify: `backend/src/api.rs` (if AppState needs factory)
-
-- [ ] **Step 1: 在 run() 中添加 Factory 初始化**
-
-在 `AppState` 创建后、`api::run()` 之前，添加 spawn 任务：
-
-```rust
-// 初始化沙箱后端选择
-spawn_sandbox_init();
-```
-
-添加 spawn 函数：
-```rust
-fn spawn_sandbox_init() {
-    // Factory init 在 api.rs 中通过 AppState 触发
-    // 暂不在此处硬编码，由 api 层在首次请求时懒初始化
-}
-```
-
-**注意：** 如果 `SandboxFactory` 在 `api.rs` 中创建，需要在 `AppState` 中持有工厂引用，并在启动时调用 `init()`。具体集成方式取决于 `api.rs` 中工厂的使用方式。
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add backend/src/main.rs
-git commit -m "feat: 预留沙箱 Factory 初始化入口"
-```
-
----
-
-### Task 7: 更新测试
+### Task 6: 更新测试
 
 **Files:**
 - Modify: `backend/tests/sandbox_trait_test.rs`
@@ -746,7 +718,7 @@ git commit -m "test(sandbox): 添加 CubeSandbox 配置和降级测试"
 
 ---
 
-### Task 8: 编译验证 + cargo fmt + 最终提交
+### Task 7: 编译验证 + cargo fmt + 最终提交
 
 - [ ] **Step 1: 格式化**
 
@@ -778,12 +750,11 @@ git commit -m "feat(sandbox): 完成 CubeSandbox Phase 2 — 后端集成 + 配�
 ## Self-Review
 
 **Spec coverage:**
-- CubeSandboxBackend ✅ (Task 2-3)
+- CubeSandboxBackend ✅ (Task 3)
 - E2BClient ✅ (Task 2)
 - Factory 降级 ✅ (Task 4)
 - Config 扩展 ✅ (Task 5)
-- 测试 ✅ (Task 7)
-- 启动初始化 ✅ (Task 6)
+- 测试 ✅ (Task 6)
 
 **Placeholder scan:** 无 TBD/TODO
 
