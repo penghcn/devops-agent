@@ -9,6 +9,43 @@ use crate::llm::ProviderConfig;
 
 // ── 公开配置结构 ──
 
+/// 沙箱相关配置
+#[derive(Debug, Clone)]
+pub struct SandboxConfig {
+    pub backends: Vec<crate::sandbox::SandboxBackend>,
+    pub timeout_secs: u64,
+    pub image: String,
+    pub cpus: u32,
+    pub memory: u64,
+    /// CubeSandbox 控制平面 API 地址
+    pub cubesandbox_api_url: String,
+    pub cubesandbox_api_key: String,
+    pub cubesandbox_template_id: String,
+    pub cubesandbox_timeout: i32,
+    pub cubesandbox_allow_internet: bool,
+    pub cubesandbox_envd_port: u16,
+    pub cubesandbox_envd_url_template: String,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            backends: vec![crate::sandbox::SandboxBackend::Microsandbox],
+            timeout_secs: 30,
+            image: "debian".to_string(),
+            cpus: 1,
+            memory: 512,
+            cubesandbox_api_url: String::new(),
+            cubesandbox_api_key: "dummy".to_string(),
+            cubesandbox_template_id: String::new(),
+            cubesandbox_timeout: 1800,
+            cubesandbox_allow_internet: true,
+            cubesandbox_envd_port: 49983,
+            cubesandbox_envd_url_template: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub log_level: String,
@@ -24,17 +61,7 @@ pub struct Config {
     pub claude_code_path: String,
     pub cors_origins: Vec<String>,
     pub api_key: Option<String>,
-    pub sandbox_backends: Vec<crate::sandbox::SandboxBackend>,
-    pub sandbox_timeout_secs: u64,
-    pub sandbox_image: String,
-    pub sandbox_cpus: u32,
-    pub sandbox_memory: u64,
-    pub cubesandbox_api_url: String,
-    pub cubesandbox_api_key: String,
-    pub cubesandbox_template_id: String,
-    pub cubesandbox_timeout: i32,
-    pub cubesandbox_allow_internet: bool,
-    pub cubesandbox_envd_url_template: String,
+    pub sandbox: SandboxConfig,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -229,8 +256,27 @@ impl Config {
             .get("sandbox.cubesandbox.allow_internet")
             .and_then(|s| s.parse().ok())
             .unwrap_or(true);
+        let cubesandbox_envd_port = conf
+            .get("sandbox.cubesandbox.envd_port")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(49983u16);
         let cubesandbox_envd_url_template =
             conf_get(&conf, "sandbox.cubesandbox.envd_url_template").unwrap_or_default();
+
+        let sandbox = SandboxConfig {
+            backends: sandbox_backends,
+            timeout_secs: sandbox_timeout_secs,
+            image: sandbox_image,
+            cpus: sandbox_cpus,
+            memory: sandbox_memory,
+            cubesandbox_api_url,
+            cubesandbox_api_key,
+            cubesandbox_template_id,
+            cubesandbox_timeout,
+            cubesandbox_allow_internet,
+            cubesandbox_envd_port,
+            cubesandbox_envd_url_template,
+        };
 
         let config = Self {
             log_level,
@@ -246,17 +292,7 @@ impl Config {
             claude_code_path,
             cors_origins,
             api_key,
-            sandbox_backends,
-            sandbox_timeout_secs,
-            sandbox_image,
-            sandbox_cpus,
-            sandbox_memory,
-            cubesandbox_api_url,
-            cubesandbox_api_key,
-            cubesandbox_template_id,
-            cubesandbox_timeout,
-            cubesandbox_allow_internet,
-            cubesandbox_envd_url_template,
+            sandbox,
         };
 
         config.validate_llm()
@@ -298,17 +334,20 @@ impl Config {
             default_provider: "openai".to_string(),
             cors_origins: vec!["http://localhost:3000".to_string()],
             api_key: None,
-            sandbox_backends: vec![crate::sandbox::SandboxBackend::Process],
-            sandbox_timeout_secs: 30,
-            sandbox_image: "debian".to_string(),
-            sandbox_cpus: 1,
-            sandbox_memory: 512,
-            cubesandbox_api_url: String::new(),
-            cubesandbox_api_key: "dummy".to_string(),
-            cubesandbox_template_id: String::new(),
-            cubesandbox_timeout: 1800,
-            cubesandbox_allow_internet: true,
-            cubesandbox_envd_url_template: String::new(),
+            sandbox: SandboxConfig {
+                backends: vec![crate::sandbox::SandboxBackend::Process],
+                timeout_secs: 30,
+                image: "debian".to_string(),
+                cpus: 1,
+                memory: 512,
+                cubesandbox_api_url: String::new(),
+                cubesandbox_api_key: "dummy".to_string(),
+                cubesandbox_template_id: String::new(),
+                cubesandbox_timeout: 1800,
+                cubesandbox_allow_internet: true,
+                cubesandbox_envd_port: 49983,
+                cubesandbox_envd_url_template: String::new(),
+            },
         }
     }
 }

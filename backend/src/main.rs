@@ -28,15 +28,16 @@ async fn run() -> anyhow::Result<()> {
 
     // 构建沙箱工厂并初始化（异步检测后端可用性）
     let cube_config = CubeSandboxConfig {
-        api_url: config.cubesandbox_api_url.clone(),
-        api_key: config.cubesandbox_api_key.clone(),
-        template_id: config.cubesandbox_template_id.clone(),
-        timeout_secs: config.cubesandbox_timeout,
-        allow_internet: config.cubesandbox_allow_internet,
-        envd_url_template: config.cubesandbox_envd_url_template.clone(),
+        api_url: config.sandbox.cubesandbox_api_url.clone(),
+        api_key: config.sandbox.cubesandbox_api_key.clone(),
+        template_id: config.sandbox.cubesandbox_template_id.clone(),
+        timeout_secs: config.sandbox.cubesandbox_timeout,
+        allow_internet: config.sandbox.cubesandbox_allow_internet,
+        envd_port: config.sandbox.cubesandbox_envd_port,
+        envd_url_template: config.sandbox.cubesandbox_envd_url_template.clone(),
     };
     let sandbox_factory = Arc::new(create_sandbox_factory(
-        &config.sandbox_backends,
+        &config.sandbox.backends,
         &cube_config,
     ));
     sandbox_factory.init().await;

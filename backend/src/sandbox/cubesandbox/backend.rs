@@ -55,9 +55,9 @@ impl CubeSandboxBackend {
 
         // 获取 envd 访问令牌
         let info = self.control.get_sandbox(&sandbox_id).await?;
-        let access_token = info
-            .envd_access_token
-            .unwrap_or_else(|| "dummy".to_string());
+        let access_token = info.envd_access_token.ok_or_else(|| {
+            anyhow::anyhow!("CubeSandbox 未返回 envd_access_token，请检查模板配置或 API 版本")
+})?;
 
         // 构建 envd 地址
         // 自托管时通过 CubeProxy 路由: {port}-{sandboxID}.{api_host}
@@ -86,7 +86,7 @@ impl CubeSandboxBackend {
             .strip_prefix("http://")
             .or_else(|| config.api_url.strip_prefix("https://"))
             .unwrap_or(&config.api_url);
-        format!("http://49983-{}.{}", sandbox_id, host)
+        format!("http://{}-{}.{}", config.envd_port, sandbox_id, host)
     }
 
     /// 获取当前 envd 客户端

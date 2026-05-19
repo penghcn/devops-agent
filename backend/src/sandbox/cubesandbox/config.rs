@@ -11,8 +11,10 @@ pub struct CubeSandboxConfig {
     pub timeout_secs: i32,
     /// 是否允许沙箱访问互联网
     pub allow_internet: bool,
+    /// envd 端口，默认 49983
+    pub envd_port: u16,
     /// envd 端点地址模板，占位符 {sandbox_id} 会被替换。
-    /// 留空则自动从 api_url 推导: http://49983-{sandbox_id}.{api_host}
+    /// 留空则自动从 api_url 推导: http://{envd_port}-{sandbox_id}.{api_host}
     pub envd_url_template: String,
 }
 
@@ -24,6 +26,7 @@ impl Default for CubeSandboxConfig {
             template_id: String::new(),
             timeout_secs: 1800,
             allow_internet: true,
+            envd_port: 49983,
             envd_url_template: String::new(),
         }
     }

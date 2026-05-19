@@ -44,7 +44,8 @@ impl Sandbox for ProcessBackend {
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<()> {
-        let cmd = format!("printf '%s' '{}' > '{}'", content, path);
+        let encoded = yunli::hash::b64(content.as_bytes());
+        let cmd = format!("echo '{}' | base64 -d > '{}'", encoded, path);
         let result = self.exec("sh", &["-c".into(), cmd]).await?;
         if result.exit_code == 0 {
             Ok(())

@@ -32,6 +32,15 @@ token = "${GITLAB_TOKEN}"
 [dev]
 claude_code_path = "claude"
 
+[sandbox.cubesandbox]
+api_url = "${CUBESANDBOX_API_URL}"
+api_key = "${CUBESANDBOX_API_KEY}"
+template_id = "${CUBESANDBOX_TEMPLATE_ID}"
+timeout = 1800
+allow_internet = true
+envd_port = 49983
+# envd_url_template = "http://49983-{sandbox_id}.your-domain.com"
+
 [server]
 port = 3000
 backend_port = 8080

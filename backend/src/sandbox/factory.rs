@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "linux")]
 use super::microsandbox_backend::{MicrosandboxBackend, MicrosandboxConfig};
@@ -39,7 +39,7 @@ impl SandboxBackend {
 /// 沙箱工厂 — 根据配置创建对应的后端
 pub struct SandboxFactory {
     backends: Vec<SandboxBackend>,
-    selected: OnceLock<SandboxBackend>,
+    selected: Mutex<Option<SandboxBackend>>,
     #[cfg(target_os = "linux")]
     micro_config: MicrosandboxConfig,
     cube_config: CubeSandboxConfig,
@@ -52,18 +52,9 @@ impl SandboxFactory {
         #[cfg(target_os = "linux")] micro_config: MicrosandboxConfig,
         cube_config: CubeSandboxConfig,
     ) -> Self {
-        // 校验首选项配置完整性
-        let primary = backends
-            .first()
-            .copied()
-            .unwrap_or(SandboxBackend::Microsandbox);
-        if primary == SandboxBackend::CubeSandbox && !cube_config.is_complete() {
-            panic!("CubeSandbox 配置不完整: api_url 和 template_id 为必填字段");
-        }
-
         Self {
             backends,
-            selected: OnceLock::new(),
+            selected: Mutex::new(None),
             #[cfg(target_os = "linux")]
             micro_config,
             cube_config,
@@ -73,7 +64,7 @@ impl SandboxFactory {
     pub fn new() -> Self {
         Self {
             backends: vec![SandboxBackend::from_env()],
-            selected: OnceLock::new(),
+            selected: Mutex::new(None),
             #[cfg(target_os = "linux")]
             micro_config: MicrosandboxConfig::default(),
             cube_config: CubeSandboxConfig::default(),
@@ -82,7 +73,7 @@ impl SandboxFactory {
 
     pub fn with_backend(mut self, backend: SandboxBackend) -> Self {
         self.backends = vec![backend];
-        self.selected = OnceLock::new();
+        self.selected = Mutex::new(None);
         self
     }
 
@@ -95,6 +86,18 @@ impl SandboxFactory {
     /// 异步初始化：按优先级检测后端可用性，缓存选择结果
     /// 应在应用启动时调用一次
     pub async fn init(&self) {
+        self._select_backend().await
+    }
+
+    /// 重置选择结果并重新检测。
+    /// 当网络拓扑变化（如 CubeSandbox 延迟启动）时调用。
+    pub async fn retry_init(&self) {
+        *self.selected.lock().unwrap() = None;
+        tracing::info!("重新检测沙箱后端");
+        self._select_backend().await
+    }
+
+    async fn _select_backend(&self) {
         for backend in &self.backends {
             if Self::check(
                 backend,
@@ -105,12 +108,12 @@ impl SandboxFactory {
             .await
             {
                 tracing::info!("选中沙箱后端: {:?}", backend);
-                self.selected.set(*backend).ok();
+                *self.selected.lock().unwrap() = Some(*backend);
                 return;
             }
         }
         tracing::warn!("配置的后端都不可用，降级为 process");
-        self.selected.set(SandboxBackend::Process).ok();
+        *self.selected.lock().unwrap() = Some(SandboxBackend::Process);
     }
 
     /// 轻量可用性检测
@@ -128,7 +131,12 @@ impl SandboxFactory {
                     tracing::warn!("CubeSandbox 配置不完整，跳过");
                     return false;
                 }
-                super::cubesandbox::client::E2BClient::health_check(&cube_config.api_url).await
+                let healthy =
+                    super::cubesandbox::client::E2BClient::health_check(&cube_config.api_url).await;
+                if !healthy {
+                    tracing::debug!("CubeSandbox API {} 健康检查失败", cube_config.api_url);
+                }
+                healthy
             }
             SandboxBackend::Process => true,
         }
@@ -136,7 +144,7 @@ impl SandboxFactory {
 
     /// 创建沙箱实例
     pub fn create(&self) -> Result<Arc<dyn Sandbox>> {
-        let backend = self.selected.get().unwrap_or(&SandboxBackend::Process);
+        let backend = self.selected.lock().unwrap().unwrap_or(SandboxBackend::Process);
         match backend {
             #[cfg(target_os = "linux")]
             SandboxBackend::Microsandbox => {

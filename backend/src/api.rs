@@ -6,7 +6,7 @@ use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 use axum::{
     Json, Router,
     body::Body,
-    http::{Request, StatusCode},
+    http::{HeaderValue, Request, StatusCode},
     response::sse::{Event, Sse},
     routing::{get, post},
     serve,
@@ -27,10 +27,8 @@ pub struct AppState {
 
 /// Start the HTTP server
 pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
-    let cors = CorsLayer::new()
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .allow_origin(Any); // TODO: 生产环境使用 config.cors_origins
+    // 构建 CORS 配置：使用配置的 origin 列表，解析失败则回退到 Any
+    let cors = build_cors(&state.config.cors_origins);
 
     let port = state.config.backend_port;
     let app = Router::new()
@@ -258,4 +256,24 @@ fn check_api_key(config: &Config, req: &Request<Body>) -> Result<(), StatusCode>
         return Err(StatusCode::UNAUTHORIZED);
     }
     Ok(())
+}
+
+/// 构建 CORS 中间件。解析配置的 origin 列表，失败则回退到 Any。
+fn build_cors(origins: &[String]) -> CorsLayer {
+    let allowed: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
+
+    if allowed.is_empty() {
+        CorsLayer::new()
+            .allow_methods(Any)
+            .allow_headers(Any)
+            .allow_origin(Any)
+    } else {
+        CorsLayer::new()
+            .allow_methods(Any)
+            .allow_headers(Any)
+            .allow_origin(allowed)
+    }
 }
