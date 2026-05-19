@@ -154,7 +154,6 @@ async fn get_latest_build_number(
     config: &Config,
 ) -> Result<u32, anyhow::Error> {
     use anyhow::Context;
-    use base64::Engine;
     use reqwest::{
         Client,
         header::{AUTHORIZATION, HeaderMap, HeaderValue},
@@ -162,7 +161,7 @@ async fn get_latest_build_number(
 
     let client = Client::new();
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,

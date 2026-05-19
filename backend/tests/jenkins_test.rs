@@ -1,4 +1,3 @@
-use base64::Engine;
 use devops_agent::config::Config;
 use devops_agent::tools::jenkins;
 use reqwest::Client;
@@ -25,10 +24,7 @@ fn get_jenkins_config(config: &Config) -> (&str, &str, &str) {
 /// 构建 Basic Auth Header
 fn build_auth_header(user: &str, token: &str) -> String {
     let auth = format!("{}:{}", user, token);
-    format!(
-        "Basic {}",
-        base64::engine::general_purpose::STANDARD.encode(&auth)
-    )
+    format!("Basic {}", yunli::hash::b64(auth.as_bytes()))
 }
 
 #[tokio::test]

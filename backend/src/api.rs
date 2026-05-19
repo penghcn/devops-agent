@@ -1,6 +1,7 @@
 use crate::agent::{AgentRequest, AgentResponse, StreamEvent};
 use crate::config::Config;
 use crate::llm::LlmConfigStore;
+use crate::sandbox::SandboxFactory;
 use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 use axum::{
     Json, Router,
@@ -21,6 +22,7 @@ pub struct AppState {
     pub config: Config,
     pub cache_manager: Arc<JenkinsCacheManager>,
     pub llm_config_store: Arc<LlmConfigStore>,
+    pub sandbox_factory: Arc<SandboxFactory>,
 }
 
 /// Start the HTTP server

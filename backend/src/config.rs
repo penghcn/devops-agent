@@ -34,6 +34,7 @@ pub struct Config {
     pub cubesandbox_template_id: String,
     pub cubesandbox_timeout: i32,
     pub cubesandbox_allow_internet: bool,
+    pub cubesandbox_envd_url_template: String,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -228,6 +229,8 @@ impl Config {
             .get("sandbox.cubesandbox.allow_internet")
             .and_then(|s| s.parse().ok())
             .unwrap_or(true);
+        let cubesandbox_envd_url_template =
+            conf_get(&conf, "sandbox.cubesandbox.envd_url_template").unwrap_or_default();
 
         let config = Self {
             log_level,
@@ -253,6 +256,7 @@ impl Config {
             cubesandbox_template_id,
             cubesandbox_timeout,
             cubesandbox_allow_internet,
+            cubesandbox_envd_url_template,
         };
 
         config.validate_llm()
@@ -304,6 +308,7 @@ impl Config {
             cubesandbox_template_id: String::new(),
             cubesandbox_timeout: 1800,
             cubesandbox_allow_internet: true,
+            cubesandbox_envd_url_template: String::new(),
         }
     }
 }
