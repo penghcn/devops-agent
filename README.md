@@ -24,11 +24,11 @@ backend/src/
 │   ├── long_term.rs           # SQLite 持久化 + 关键词索引
 │   └── store.rs               # SQLite 初始化 + 迁移
 │
-├── token/                     # Token 管理
+├── token/                     # Token 管理 + 压缩
 │   ├── mod.rs
 │   ├── tracker.rs             # 实时计数 + 预算 + 轮次计数
-│   ├── window.rs              # 四层上下文（System/Compressed/Structured/Linear）
-│   └── summarizer.rs          # 渐进式三阶段 LLM 压缩
+│   ├── window.rs              # 四层上下文（System/Compressed/Structured/Linear）+ 混合 Token 估算
+│   └── summarizer.rs          # 混合触发压缩（轮次本地快压 + Token 阈值 LLM 深压）
 │
 ├── security/                  # 权限控制
 │   ├── mod.rs
@@ -61,15 +61,20 @@ backend/src/
 │   │   ├── read.rs            # 安全文件读取
 │   │   ├── write.rs           # 文件写入
 │   │   ├── bash.rs            # 命令执行（白名单校验）
-│   │   └── git.rs             # git 操作
+│   │   ├── git.rs             # git 操作
+│   │   └── helpers.rs         # 辅助工具（get_time/get_env/get_config，会话级缓存 + TTL）
 │   ├── jenkins.rs             # Jenkins API 封装
 │   ├── jenkins_cache.rs       # 构建缓存
 │   └── gitlab.rs              # GitLab API 封装
 │
-├── llm/                       # LLM 提供商抽象
+├── llm/                       # LLM 提供商抽象 + Prompt 构建
 │   ├── mod.rs                 # LlmProvider trait + Message/ChatRequest 等类型
 │   ├── router.rs              # ModelRouter：L1/L2 任务分类 + provider 路由
 │   ├── structured_output.rs   # Schema 强约束输出
+│   ├── prompt_builder.rs      # 七层 Prompt 构建器（前缀缓存最大化）
+│   │   ├── StaticPrefix       # 层 1~3 预编译缓存（静态 System + 工具指南 + 项目规则）
+│   │   ├── SessionSlots       # 层 5 结构化槽位（目标 + 步骤 + 错误）
+│   │   └── MemorySlot         # 层 4 高分记忆过滤注入
 │   └── provider/              # Provider 实现（适配器模式）
 │       ├── mod.rs
 │       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>
@@ -132,10 +137,36 @@ backend/src/
 ### Token 渐进式压缩
 
 ```
+触发策略（混合触发）:
+  - 轮次到达阈值(10) → 本地快速压缩（句子边界截断）
+  - Token 使用率>80% → LLM 深度压缩
+  - Token 估算: 中文 ~1.5/字, ASCII ~4 char/token
+
+压缩产物处理:
+  - 被压缩的 Linear 消息删除
+  - 摘要追加到 Compressed 层尾部（后续请求可缓存）
+
 阶段 1 (轮次 1~10):  线性保留，零开销
-阶段 2 (轮次 11~15): LLM 摘要旧数据，保留最近 5 轮线性
-阶段 3 (轮次 16+):   结构化文档 (confirmed/conflicts/pending) + 最近 5 轮线性
-                     每轮滑动窗口，L1 模型增量更新
+阶段 2 (轮次 11~15): 本地摘要旧数据，保留最近 5 轮线性
+阶段 3 (轮次 16+):   结构化文档 + 最近 5 轮线性
+                     Token 快满时升级为 LLM 深度压缩
+```
+
+### Prompt 构建架构（七层前缀缓存最大化）
+
+```
+层 1 [100% 缓存]  静态 System 核心（角色/行为准则/安全红线）
+层 2 [100% 缓存]  静态工具定义（核心工具 + get_time/get_env/get_config）
+层 3 [高缓存]     半静态规则（项目 CLAUDE.md / 通用规则）
+层 4 [部分缓存]   动态记忆（高分记忆注入，低分留 SQLite）
+层 5 [低缓存]     Session 上下文（结构化槽位：目标 + 步骤 + 错误）
+层 6 [低缓存]     动态工具（Jenkins/GitLab 场景工具按需追加）
+层 7 [0% 缓存]    对话 Messages（智能分层裁剪）
+
+辅助工具缓存:
+  - get_time: TTL 1 分钟
+  - get_env/get_config: TTL 10 分钟
+  - 环境变量/配置路径白名单校验
 ```
 ## Agent Loop
 ```

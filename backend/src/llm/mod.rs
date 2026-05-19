@@ -7,10 +7,14 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod prompt_builder;
 pub mod provider;
 pub mod router;
 pub mod structured_output;
 
+pub use prompt_builder::{
+    MemorySlot, PromptBuilder, PromptBuilderConfig, SessionSlots, StaticPrefix,
+};
 pub use provider::{
     AnthropicAdapter, AnthropicProvider, LlmConfigSnapshot, LlmConfigStore, OpenAIAdapter,
     OpenAIProvider, ProviderConfig,

@@ -16,9 +16,32 @@ pub struct ContextLayer {
 }
 
 impl ContextLayer {
-    /// 估算 Token 数量（按每 4 字符 = 1 token）
+    /// 混合 Token 估算：中文 ~1.5/字，ASCII ~4 char/token
     pub fn token_estimate(&self) -> u32 {
-        self.messages.iter().map(|m| m.len() as u32 / 4).sum()
+        self.messages
+            .iter()
+            .map(|m| Self::estimate_text(m) as u32)
+            .sum()
+    }
+
+    /// 估算单段文本的 Token 数
+    fn estimate_text(s: &str) -> f32 {
+        let mut cjk_count: f32 = 0.0;
+        let mut ascii_count: f32 = 0.0;
+
+        for ch in s.chars() {
+            if ch.is_ascii() {
+                ascii_count += 1.0;
+            } else if ch.is_alphabetic() || ch.is_numeric() {
+                // CJK 汉字按 1.5 token/字
+                cjk_count += 1.5;
+            } else {
+                // 标点、空白等按 1 token
+                cjk_count += 1.0;
+            }
+        }
+
+        (ascii_count / 4.0) + cjk_count
     }
 }
 
