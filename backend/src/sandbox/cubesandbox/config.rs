@@ -1,11 +1,19 @@
 /// CubeSandbox 后端配置
 #[derive(Debug, Clone)]
 pub struct CubeSandboxConfig {
+    /// 控制平面 API 地址（CubeAPI），如 http://127.0.0.1:3000
     pub api_url: String,
+    /// API 密钥（自托管时可用 dummy）
     pub api_key: String,
+    /// 沙箱模板 ID
     pub template_id: String,
+    /// 沙箱超时时间（秒），默认 1800
     pub timeout_secs: i32,
+    /// 是否允许沙箱访问互联网
     pub allow_internet: bool,
+    /// envd 端点地址模板，占位符 {sandbox_id} 会被替换。
+    /// 留空则自动从 api_url 推导: http://49983-{sandbox_id}.{api_host}
+    pub envd_url_template: String,
 }
 
 impl Default for CubeSandboxConfig {
@@ -16,6 +24,7 @@ impl Default for CubeSandboxConfig {
             template_id: String::new(),
             timeout_secs: 1800,
             allow_internet: true,
+            envd_url_template: String::new(),
         }
     }
 }

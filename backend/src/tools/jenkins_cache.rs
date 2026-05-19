@@ -7,7 +7,6 @@ use tokio::sync::RwLock;
 
 use crate::config::Config;
 use crate::tools::jenkins::JobTypeInfo;
-use base64::Engine;
 
 /// Jenkins Job 信息（缓存用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,7 +73,7 @@ impl JenkinsCacheManager {
     async fn fetch_all_jobs(&self) -> Result<Vec<CachedJob>> {
         let client = reqwest::Client::new();
         let auth_value = format!("{}:{}", self.config.jenkins_user, self.config.jenkins_token);
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+        let encoded = yunli::hash::b64(auth_value.as_bytes());
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,

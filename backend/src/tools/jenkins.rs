@@ -1,6 +1,5 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
-use base64::Engine;
 use reqwest::{
     Client,
     header::{AUTHORIZATION, HeaderMap, HeaderValue},
@@ -43,7 +42,7 @@ pub async fn trigger_job(
 
     // 构建 Basic Auth
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -106,7 +105,7 @@ pub async fn check_job_exists(
     let client = Client::new();
 
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -142,7 +141,7 @@ pub async fn get_job_status(job_name: &str, config: &Config) -> Result<serde_jso
     let client = Client::new();
 
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -189,7 +188,7 @@ pub async fn trigger_pipeline(
     let http_url = format!("{}/job/{}/build", config.jenkins_url, http_job_path);
 
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -309,7 +308,7 @@ pub async fn get_cli_jar(config: &Config) -> Result<String> {
 
     let client = Client::new();
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -337,7 +336,7 @@ async fn get_latest_build_number(
 ) -> Result<u32> {
     let client = Client::new();
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -391,7 +390,7 @@ pub async fn get_pipeline_status(
     let client = Client::new();
 
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -512,7 +511,7 @@ pub async fn get_build_log(
     let client = Client::new();
 
     let auth_value = format!("{}:{}", config.jenkins_user, config.jenkins_token);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&auth_value);
+    let encoded = yunli::hash::b64(auth_value.as_bytes());
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,

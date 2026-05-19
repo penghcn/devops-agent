@@ -28,7 +28,10 @@ tokio-util = "0.7"    # 异步运行时工具
 futures = "0.3"       # SSE 流式响应
 tokio-stream = "0.1"  # SSE ReceiverStream
 uuid = { version = "1", features = ["v4"] }  # Session IDs
-microsandbox = "0.4"       # 代码沙箱执行
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite"] }  # SQLite 持久化
+
+[target.'cfg(target_os = "linux")'.dependencies]
+microsandbox = "0.4"       # 代码沙箱执行（仅 Linux，KVM 依赖在 macOS 不可用）
 
 [dev-dependencies]
 ctor = "0.2"

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use devops_agent::api::AppState;
 use devops_agent::config::Config;
 use devops_agent::llm::{ChatRequest, LlmConfigStore, Message};
+use devops_agent::sandbox::{CubeSandboxConfig, SandboxFactory};
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 
 #[tokio::main]
@@ -25,6 +26,21 @@ async fn run() -> anyhow::Result<()> {
         config.default_provider.clone(),
     ));
 
+    // 构建沙箱工厂并初始化（异步检测后端可用性）
+    let cube_config = CubeSandboxConfig {
+        api_url: config.cubesandbox_api_url.clone(),
+        api_key: config.cubesandbox_api_key.clone(),
+        template_id: config.cubesandbox_template_id.clone(),
+        timeout_secs: config.cubesandbox_timeout,
+        allow_internet: config.cubesandbox_allow_internet,
+        envd_url_template: config.cubesandbox_envd_url_template.clone(),
+    };
+    let sandbox_factory = Arc::new(create_sandbox_factory(
+        &config.sandbox_backends,
+        &cube_config,
+    ));
+    sandbox_factory.init().await;
+
     // 写端口文件供 run.sh 使用
     let port_dir = std::env::var("DEVOPS_LOG_DIR").unwrap_or_else(|_| "logs".to_string());
     if let Err(e) = std::fs::write(format!("{port_dir}/backend.port"), backend_port.to_string()) {
@@ -43,6 +59,7 @@ async fn run() -> anyhow::Result<()> {
         config,
         cache_manager,
         llm_config_store,
+        sandbox_factory,
     });
 
     devops_agent::api::run(state).await
@@ -123,4 +140,25 @@ fn spawn_cache_refresher(cm: Arc<JenkinsCacheManager>) {
             }
         }
     });
+}
+
+#[cfg(target_os = "linux")]
+fn create_sandbox_factory(
+    backends: &[devops_agent::sandbox::SandboxBackend],
+    cube_config: &CubeSandboxConfig,
+) -> SandboxFactory {
+    use devops_agent::sandbox::MicrosandboxConfig;
+    SandboxFactory::from_config(
+        backends.to_vec(),
+        MicrosandboxConfig::default(),
+        cube_config.clone(),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_sandbox_factory(
+    backends: &[devops_agent::sandbox::SandboxBackend],
+    cube_config: &CubeSandboxConfig,
+) -> SandboxFactory {
+    SandboxFactory::from_config(backends.to_vec(), cube_config.clone())
 }
