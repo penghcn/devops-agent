@@ -1,3 +1,4 @@
+pub mod cubesandbox;
 pub mod factory;
 #[cfg(target_os = "linux")]
 pub mod microsandbox_backend;
@@ -45,6 +46,7 @@ impl fmt::Display for SandboxError {
 impl std::error::Error for SandboxError {}
 
 // 新抽象层导出
+pub use cubesandbox::CubeSandboxConfig;
 pub use factory::{MicrosandboxConfig, SandboxBackend, SandboxFactory};
 pub use process_backend::ProcessBackend;
 pub use trait_sandbox::{ExecResult, Sandbox};
