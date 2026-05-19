@@ -36,12 +36,19 @@ backend/src/
 │   ├── policy.rs              # 策略引擎：ALLOW/DENY/PROMPT
 │   └── audit.rs               # 操作审计日志
 │
-├── sandbox/                   # 沙箱隔离（分层架构）
+├── sandbox/                   # 沙箱隔离（多后端可切换架构）
 │   ├── mod.rs
 │   ├── trait_sandbox.rs       # Sandbox trait + ExecResult 统一接口
-│   ├── process_backend.rs     # ProcessBackend：适配现有进程沙箱（降级方案）
-│   ├── microsandbox_backend.rs # MicrosandboxBackend：基于 microsandbox SDK（Linux）
-│   ├── factory.rs             # SandboxFactory：环境变量自动选择后端
+│   ├── factory.rs             # SandboxFactory：配置驱动降级 + 异步后端检测
+│   │
+│   ├── cubesandbox/           # CubeSandbox 后端（E2B 兼容，双平面架构）
+│   │   ├── mod.rs
+│   │   ├── config.rs          # CubeSandboxConfig：API 地址、模板、envd URL 模板
+│   │   ├── client.rs          # ControlPlaneClient（REST 控制平面）+ EnvdClient（Connect RPC 数据平面）
+│   │   └── backend.rs         # CubeSandboxBackend：懒初始化 + 持久化 + Sandbox trait 实现
+│   │
+│   ├── process_backend.rs     # ProcessBackend：本地进程沙箱（最终降级方案）
+│   ├── microsandbox_backend.rs # MicrosandboxBackend：基于 microsandbox SDK（仅 Linux）
 │   ├── process_sandbox.rs     # 进程限制 + 环境净化（底层实现）
 │   ├── path_check.rs          # 路径穿越检测
 │   ├── fs_isolation.rs        # 文件系统隔离 + 选择性挂载
@@ -115,7 +122,10 @@ backend/src/
               └── Harness Orchestrator → 编排核心
                     ├── Hook: Token (Token 预算追踪)
                     ├── Hook: Memory (记忆保存)
-                    ├── Sandbox (沙箱隔离)
+                    ├── SandboxFactory → 配置驱动后端选择
+                    │     ├── CubeSandbox（REST 控制平面 + Connect RPC 数据平面，懒初始化）
+                    │     ├── Microsandbox（microsandbox SDK，仅 Linux KVM）
+                    │     └── Process（本地进程沙箱，最终降级）
                     └── Tools (工具集)
 ```
 
