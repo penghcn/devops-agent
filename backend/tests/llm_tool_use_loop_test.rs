@@ -787,3 +787,128 @@ mod signal_voting_tests {
         assert!(voter.should_escalate());
     }
 }
+
+// ── Slice 8: tool_search 元工具 ──
+
+mod tool_search_tests {
+    use devops_agent::llm::ToolDefinition;
+    use devops_agent::llm::tool_use_loop::{ToolRegistry, ToolSource};
+
+    fn make_def(name: &str, _category: &str) -> ToolDefinition {
+        ToolDefinition {
+            name: name.to_string(),
+            description: format!("{} 工具", name),
+            parameters: serde_json::json!({"type": "object", "properties": {}}),
+        }
+    }
+
+    #[test]
+    fn tool_registry_exact_match() {
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "jenkins_trigger",
+            ToolSource::Dynamic,
+            make_def("jenkins_trigger", "jenkins"),
+        );
+        registry.register(
+            "jenkins_status",
+            ToolSource::Dynamic,
+            make_def("jenkins_status", "jenkins"),
+        );
+
+        let results = registry.search("jenkins_trigger");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name(), "jenkins_trigger");
+    }
+
+    #[test]
+    fn tool_registry_synonym_match() {
+        let mut registry = ToolRegistry::new();
+        registry.add_synonyms("jenkins_trigger", &["流水线", "CI", "构建", "pipeline"]);
+        registry.register(
+            "jenkins_trigger",
+            ToolSource::Dynamic,
+            make_def("jenkins_trigger", "jenkins"),
+        );
+
+        // 用同义词搜索
+        let results = registry.search("构建");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name(), "jenkins_trigger");
+    }
+
+    #[test]
+    fn tool_registry_category_match() {
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "jenkins_trigger",
+            ToolSource::Dynamic,
+            make_def("jenkins_trigger", "jenkins"),
+        );
+        registry.register(
+            "jenkins_status",
+            ToolSource::Dynamic,
+            make_def("jenkins_status", "jenkins"),
+        );
+        registry.register(
+            "gitlab_mr",
+            ToolSource::Dynamic,
+            make_def("gitlab_mr", "gitlab"),
+        );
+
+        // 按分类批量召回
+        let results = registry.search_category("jenkins");
+        assert_eq!(results.len(), 2);
+        let names: Vec<_> = results.iter().map(|t| t.name()).collect();
+        assert!(names.contains(&"jenkins_trigger"));
+        assert!(names.contains(&"jenkins_status"));
+    }
+
+    #[test]
+    fn tool_registry_substring_fallback() {
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "gitlab_merge_request",
+            ToolSource::Dynamic,
+            make_def("gitlab_merge_request", "gitlab"),
+        );
+
+        // 子串匹配兜底
+        let results = registry.search("merge");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name(), "gitlab_merge_request");
+    }
+
+    #[test]
+    fn tool_registry_no_match() {
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "jenkins_trigger",
+            ToolSource::Dynamic,
+            make_def("jenkins_trigger", "jenkins"),
+        );
+
+        let results = registry.search("完全无关的查询");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn tool_registry_source_filter() {
+        let mut registry = ToolRegistry::new();
+        registry.register("read", ToolSource::Builtin, make_def("read", "builtin"));
+        registry.register(
+            "jenkins_trigger",
+            ToolSource::Dynamic,
+            make_def("jenkins_trigger", "jenkins"),
+        );
+
+        let all = registry.list_tools();
+        assert_eq!(all.len(), 2);
+
+        let dynamic: Vec<_> = all
+            .iter()
+            .filter(|t| t.source == ToolSource::Dynamic)
+            .collect();
+        assert_eq!(dynamic.len(), 1);
+    }
+}
