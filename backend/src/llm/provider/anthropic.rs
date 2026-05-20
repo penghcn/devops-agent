@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 
 use super::base::{BaseConfig, GenericProvider, ProviderAdapter};
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice};
+use crate::llm::{
+    ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice,
+};
 
 /// Anthropic Provider — 便捷封装 `GenericProvider<AnthropicAdapter>`
 ///
@@ -227,6 +229,17 @@ impl AnthropicAdapter {
                     "content": blocks,
                 }))
             }
+            Message::ToolResult {
+                tool_call_id,
+                content,
+            } => Some(serde_json::json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": content,
+                }]
+            })),
         }
     }
 }

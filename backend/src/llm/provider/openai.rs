@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 
 use super::base::{BaseConfig, GenericProvider, ProviderAdapter};
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice};
+use crate::llm::{
+    ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice,
+};
 
 /// OpenAI Provider — 便捷封装 `GenericProvider<OpenAIAdapter>`
 ///
@@ -224,6 +226,14 @@ impl OpenAIAdapter {
 
                 Some(msg_obj)
             }
+            Message::ToolResult {
+                tool_call_id,
+                content,
+            } => Some(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": content,
+            })),
         }
     }
 }

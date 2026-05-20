@@ -11,6 +11,7 @@ pub mod prompt_builder;
 pub mod provider;
 pub mod router;
 pub mod structured_output;
+pub mod tool_use_loop;
 
 pub use prompt_builder::{
     MemorySlot, PromptBuilder, PromptBuilderConfig, SessionSlots, StaticPrefix,
@@ -41,6 +42,7 @@ pub trait LlmProvider: Send + Sync {
 
 /// A single message in a conversation turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
     System {
         content: String,
@@ -51,6 +53,11 @@ pub enum Message {
     Assistant {
         content: String,
         tool_calls: Vec<ToolCall>,
+    },
+    /// Result of a tool execution, fed back to the LLM.
+    ToolResult {
+        tool_call_id: String,
+        content: String,
     },
 }
 
