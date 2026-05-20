@@ -912,3 +912,46 @@ mod tool_search_tests {
         assert_eq!(dynamic.len(), 1);
     }
 }
+
+// ── Slice 9: 降级交接 ──
+
+mod fallback_tests {
+    use devops_agent::llm::tool_use_loop::{FallbackHandler, FallbackReason, FallbackResult};
+
+    #[test]
+    fn fallback_reason_display() {
+        let reason = FallbackReason::SignalEscalation;
+        let display = format!("{}", reason);
+        assert!(!display.is_empty());
+    }
+
+    #[test]
+    fn fallback_handler_build_command() {
+        let handler = FallbackHandler::new("/usr/bin/claude");
+        let cmd = handler.build_command("修复这个 bug", "main");
+        let cmd_str = cmd.join(" ");
+        assert!(cmd_str.contains("claude"));
+        assert!(cmd_str.contains("修复这个 bug"));
+    }
+
+    #[test]
+    fn fallback_handler_timeout_config() {
+        let mut handler = FallbackHandler::new("/usr/bin/claude");
+        handler.set_timeout_secs(120);
+        assert_eq!(handler.timeout_secs(), 120);
+    }
+
+    #[test]
+    fn fallback_result_success() {
+        let result = FallbackResult::success("修复完成", 30);
+        assert!(result.success);
+        assert_eq!(result.token_usage, 30);
+    }
+
+    #[test]
+    fn fallback_result_failure() {
+        let result = FallbackResult::failure("超时", FallbackReason::Timeout);
+        assert!(!result.success);
+        assert_eq!(result.reason, Some(FallbackReason::Timeout));
+    }
+}
