@@ -144,7 +144,11 @@ impl SandboxFactory {
 
     /// 创建沙箱实例
     pub fn create(&self) -> Result<Arc<dyn Sandbox>> {
-        let backend = self.selected.lock().unwrap().unwrap_or(SandboxBackend::Process);
+        let backend = self
+            .selected
+            .lock()
+            .unwrap()
+            .unwrap_or(SandboxBackend::Process);
         match backend {
             #[cfg(target_os = "linux")]
             SandboxBackend::Microsandbox => {

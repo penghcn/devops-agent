@@ -260,10 +260,7 @@ fn check_api_key(config: &Config, req: &Request<Body>) -> Result<(), StatusCode>
 
 /// 构建 CORS 中间件。解析配置的 origin 列表，失败则回退到 Any。
 fn build_cors(origins: &[String]) -> CorsLayer {
-    let allowed: Vec<HeaderValue> = origins
-        .iter()
-        .filter_map(|o| o.parse().ok())
-        .collect();
+    let allowed: Vec<HeaderValue> = origins.iter().filter_map(|o| o.parse().ok()).collect();
 
     if allowed.is_empty() {
         CorsLayer::new()
