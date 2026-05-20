@@ -46,13 +46,8 @@ pub enum StructuredOutputMode {
 #[derive(Debug)]
 pub enum StructuredOutputError {
     LlmError(LlmError),
-    ParseError {
-        response: String,
-        detail: String,
-    },
-    MaxRetriesExceeded {
-        responses: Vec<String>,
-    },
+    ParseError { response: String, detail: String },
+    MaxRetriesExceeded { responses: Vec<String> },
 }
 
 impl std::fmt::Display for StructuredOutputError {
@@ -172,27 +167,27 @@ impl StructuredOutput {
             };
 
             // 根据模式提取 JSON
-            let json_str = match self.mode {
-                StructuredOutputMode::ToolUse => {
-                    self.extract_from_tool_use(&response).ok_or_else(|| {
-                        StructuredOutputError::ParseError {
-                            response: response.content[..response.content.len().min(200)].to_string(),
+            let json_str =
+                match self.mode {
+                    StructuredOutputMode::ToolUse => self
+                        .extract_from_tool_use(&response)
+                        .ok_or_else(|| StructuredOutputError::ParseError {
+                            response: response.content[..response.content.len().min(200)]
+                                .to_string(),
                             detail: "No tool call found in response".to_string(),
+                        })?,
+                    StructuredOutputMode::EnhancedPrompt => {
+                        // Prefill `{` 已被模型输出，拼接回去
+                        let content = response.content.trim().to_string();
+                        if !content.starts_with('{') && attempt == 0 {
+                            // First attempt with prefill: the `{` is the prefill, not in response
+                            let prefix = "{";
+                            format!("{}{}", prefix, content)
+                        } else {
+                            content
                         }
-                    })?
-                }
-                StructuredOutputMode::EnhancedPrompt => {
-                    // Prefill `{` 已被模型输出，拼接回去
-                    let content = response.content.trim().to_string();
-                    if !content.starts_with('{') && attempt == 0 {
-                        // First attempt with prefill: the `{` is the prefill, not in response
-                        let prefix = "{";
-                        format!("{}{}", prefix, content)
-                    } else {
-                        content
                     }
-                }
-            };
+                };
 
             match self.robust_parse(&json_str) {
                 Ok(parsed) => return Ok(parsed),
@@ -394,7 +389,7 @@ impl StructuredOutput {
                         "JSON valid but type mismatch: {} (value: {})",
                         e,
                         v_str.chars().take(100).collect::<String>()
-                    ))
+                    ));
                 }
             }
         }
@@ -419,8 +414,14 @@ impl StructuredOutput {
     fn fix_common_errors(text: &str) -> String {
         let mut s = text.to_string();
         // Fix trailing commas before } or ]
-        s = s.replace(", }", "}").replace(",\t}", "}").replace(",}", "}");
-        s = s.replace(", ]", "]").replace(",\t]", "]").replace(",]", "]");
+        s = s
+            .replace(", }", "}")
+            .replace(",\t}", "}")
+            .replace(",}", "}");
+        s = s
+            .replace(", ]", "]")
+            .replace(",\t]", "]")
+            .replace(",]", "]");
         // Fix single quotes to double quotes (simple replacement)
         s = s.replace('\'', "\"");
         s
@@ -515,7 +516,9 @@ mod tests {
     fn test_robust_parse_braces() {
         let so = build_mock_output();
         let result: TestIntent = so
-            .robust_parse("Here is the result: {\"action\":\"query\",\"job_name\":\"my-job\"} done.")
+            .robust_parse(
+                "Here is the result: {\"action\":\"query\",\"job_name\":\"my-job\"} done.",
+            )
             .unwrap();
         assert_eq!(result.action, "query");
     }
@@ -597,10 +600,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LlmProvider for MockProvider {
-        async fn llm_call(
-            &self,
-            _request: &ChatRequest,
-        ) -> Result<ChatResponse, LlmError> {
+        async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
             Ok(ChatResponse {
                 content: "{}".into(),
                 tool_calls: Vec::new(),
