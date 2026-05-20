@@ -55,6 +55,9 @@ impl Step for ClaudeCodeStep {
                     }],
                     tools: None,
                     temperature: Some(0.0),
+                    tool_choice: None,
+                    stop_sequences: None,
+                    prefill: None,
                 })
                 .await
             {

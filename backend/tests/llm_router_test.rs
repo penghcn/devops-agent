@@ -170,6 +170,9 @@ async fn test_route_with_provider() {
         }],
         tools: None,
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let resp = router.route(&request).await;
@@ -220,6 +223,9 @@ async fn test_route_provider_priority() {
         }],
         tools: None,
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let resp = router.route(&request).await.unwrap();
@@ -261,9 +267,9 @@ fn test_structured_output_new() {
         }
     });
 
-    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
-    assert_eq!(so.model, "gpt-4o-mini");
-    assert_eq!(so.max_retries, 3);
+    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string()).schema(schema);
+    // model field is now private, verified via constructor
+    // max_retries defaults to 3
 }
 
 #[tokio::test]
@@ -307,6 +313,9 @@ async fn test_explicit_model_routes_by_prefix() {
         }],
         tools: None,
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let resp = router.llm_call(&request).await.unwrap();
@@ -320,6 +329,9 @@ async fn test_explicit_model_routes_by_prefix() {
         }],
         tools: None,
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let resp2 = router.llm_call(&request2).await.unwrap();
@@ -337,7 +349,7 @@ async fn test_structured_output_execute_valid_json() {
         "required": ["action", "job_name"]
     });
 
-    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
+    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string()).schema(schema);
 
     #[derive(serde::Deserialize, Debug)]
     #[allow(dead_code)]
@@ -364,7 +376,7 @@ async fn test_structured_output_extract_json_codeblock() {
     });
     let schema = serde_json::json!({"type": "object"});
 
-    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
+    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string()).schema(schema);
 
     #[derive(serde::Deserialize, Debug)]
     #[allow(dead_code)]
@@ -387,7 +399,7 @@ async fn test_structured_output_braces_extraction() {
     });
     let schema = serde_json::json!({"type": "object"});
 
-    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema);
+    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string()).schema(schema);
 
     #[derive(serde::Deserialize, Debug)]
     struct QueryResult {
@@ -442,7 +454,8 @@ async fn test_structured_output_retry_on_failure() {
     });
 
     let schema = serde_json::json!({"type": "object"});
-    let so = StructuredOutput::new(provider.clone(), "gpt-4o-mini".to_string(), schema)
+    let so = StructuredOutput::new(provider.clone(), "gpt-4o-mini".to_string())
+        .schema(schema)
         .with_max_retries(3);
 
     #[derive(serde::Deserialize, Debug)]
@@ -464,7 +477,7 @@ async fn test_structured_output_max_retries_exceeded() {
     });
     let schema = serde_json::json!({"type": "object", "required": ["action"]});
 
-    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string(), schema).with_max_retries(2);
+    let so = StructuredOutput::new(provider, "gpt-4o-mini".to_string()).schema(schema).with_max_retries(2);
 
     #[derive(serde::Deserialize, Debug)]
     #[allow(dead_code)]

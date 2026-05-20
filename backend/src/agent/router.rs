@@ -326,17 +326,17 @@ impl IntentRouter {
         let so = StructuredOutput::new(
             provider.clone(),
             self.llm_model.clone(),
-            serde_json::json!({
-                "type": "object",
-                "required": ["action", "job_name"],
-                "properties": {
-                    "action": {"type": "string", "enum": ["deploy", "build", "query", "analyze"]},
-                    "job_name": {"type": "string"},
-                    "branch": {"type": "string", "nullable": true},
-                    "job_type": {"type": "string", "enum": ["standard", "branch"]}
-                }
-            }),
-        );
+        )
+        .schema(serde_json::json!({
+            "type": "object",
+            "required": ["action", "job_name"],
+            "properties": {
+                "action": {"type": "string", "enum": ["deploy", "build", "query", "analyze"]},
+                "job_name": {"type": "string"},
+                "branch": {"type": "string", "nullable": true},
+                "job_type": {"type": "string", "enum": ["standard", "branch"]}
+            }
+        }));
 
         match so.execute::<serde_json::Value>(&intent_prompt).await {
             Ok(json) => intent_from_value(json).ok(),

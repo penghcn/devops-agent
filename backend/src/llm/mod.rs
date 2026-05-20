@@ -63,6 +63,21 @@ pub struct ChatRequest {
     pub messages: Vec<Message>,
     pub tools: Option<Vec<ToolDefinition>>,
     pub temperature: Option<f32>,
+    /// 强制选择特定工具（Tool Use 结构化输出模式）
+    pub tool_choice: Option<ToolChoice>,
+    /// 停止序列（Anthropic stop_sequences / OpenAI stop）
+    pub stop_sequences: Option<Vec<String>>,
+    /// Prefill 预填起始内容（如 "{" 用于 JSON 输出）
+    pub prefill: Option<String>,
+}
+
+/// 工具选择策略
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolChoice {
+    /// 强制调用指定名称的工具
+    Tool { name: String },
+    /// 必须调用任意一个工具
+    Any,
 }
 
 /// Unified tool definition (input side).  Providers translate this to

@@ -241,6 +241,9 @@ impl PromptBuilder {
             messages,
             tools,
             temperature: None,
+            tool_choice: None,
+            stop_sequences: None,
+            prefill: None,
         }
     }
 

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use super::base::{BaseConfig, GenericProvider, ProviderAdapter};
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice};
 
 /// Anthropic Provider — 便捷封装 `GenericProvider<AnthropicAdapter>`
 ///
@@ -61,11 +61,19 @@ impl ProviderAdapter for AnthropicAdapter {
             _ => None,
         });
 
-        let messages: Vec<serde_json::Value> = request
+        let mut messages: Vec<serde_json::Value> = request
             .messages
             .iter()
             .filter_map(|msg| self.message_to_anthropic(msg))
             .collect();
+
+        // Prefill: append assistant message as the last message
+        if let Some(ref prefill) = request.prefill {
+            messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": prefill,
+            }));
+        }
 
         let mut body = serde_json::json!({
             "model": model,
@@ -90,6 +98,24 @@ impl ProviderAdapter for AnthropicAdapter {
                 })
                 .collect();
             body["tools"] = serde_json::json!(anthropic_tools);
+        }
+
+        // Tool Choice
+        if let Some(ref choice) = request.tool_choice {
+            let tc = match choice {
+                ToolChoice::Tool { name } => {
+                    serde_json::json!({ "type": "tool", "tool": { "name": name } })
+                }
+                ToolChoice::Any => {
+                    serde_json::json!({ "type": "any" })
+                }
+            };
+            body["tool_choice"] = tc;
+        }
+
+        // Stop Sequences
+        if let Some(ref stops) = request.stop_sequences {
+            body["stop_sequences"] = serde_json::json!(stops);
         }
 
         body

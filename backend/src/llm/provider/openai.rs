@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use super::base::{BaseConfig, GenericProvider, ProviderAdapter};
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall};
+use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice};
 
 /// OpenAI Provider — 便捷封装 `GenericProvider<OpenAIAdapter>`
 ///
@@ -54,11 +54,19 @@ impl ProviderAdapter for OpenAIAdapter {
             &request.model
         };
 
-        let messages: Vec<serde_json::Value> = request
+        let mut messages: Vec<serde_json::Value> = request
             .messages
             .iter()
             .filter_map(|msg| self.message_to_openai(msg))
             .collect();
+
+        // Prefill: append assistant message as the last message
+        if let Some(ref prefill) = request.prefill {
+            messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": prefill,
+            }));
+        }
 
         let mut body = serde_json::json!({
             "model": model,
@@ -81,6 +89,27 @@ impl ProviderAdapter for OpenAIAdapter {
                 })
                 .collect();
             body["tools"] = serde_json::json!(openai_tools);
+        }
+
+        // Tool Choice
+        if let Some(ref choice) = request.tool_choice {
+            let tc = match choice {
+                ToolChoice::Tool { name } => {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": { "name": name }
+                    })
+                }
+                ToolChoice::Any => {
+                    serde_json::json!("required")
+                }
+            };
+            body["tool_choice"] = tc;
+        }
+
+        // Stop Sequences
+        if let Some(ref stops) = request.stop_sequences {
+            body["stop"] = serde_json::json!(stops);
         }
 
         body

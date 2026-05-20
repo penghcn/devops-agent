@@ -28,6 +28,48 @@
 - **Token 估算**：中文 ~1.5 token/字，ASCII 4 char/token，混合计算
 - **对话裁剪**：需求/约束类消息提升到 Compressed 层永不裁剪；普通问答按时间裁剪
 
+### Tool-Use 消息统一管理
+
+Tool-Use 流程产生的消息按类型分发到四层，与对话消息共享压缩策略：
+
+```
+Layer::System       ← 层 1~3 静态前缀（不可压缩，100% 缓存）
+Layer::Compressed   ← 压缩产物 + 用户原始请求（不可压缩，永不裁剪）
+Layer::Structured   ← Session 结构化槽位（可压缩，轮次>15 时压缩）
+Layer::Linear       ← tool_calls + tool_results + assistant 文本（可压缩）
+```
+
+**Tool-Use 消息分层规则：**
+
+| 消息类型 | 归属层 | 压缩策略 |
+|---------|--------|---------|
+| 用户原始请求 | Compressed | 永不裁剪，追加到 Compressed 层头部 |
+| tool_call (LLM 发起的工具调用) | Linear | 跟随 Linear 层压缩 |
+| tool_result (工具执行结果) | Linear | 跟随 Linear 层压缩 |
+| assistant 纯文本回复 | Linear | 跟随 Linear 层压缩 |
+| 死循环干预提示 | Linear | 跟随 Linear 层压缩 |
+| Session 槽位（目标/步骤/错误） | Structured | 轮次>15 时整体压缩 |
+
+**Linear 层压缩三阶段（与对话统一）：**
+
+| 阶段 | 轮次范围 | 策略 | Linear 保留 |
+|------|---------|------|------------|
+| Phase 1 | 1~10 | 零开销，全部保留 | 全部 |
+| Phase 2 | 11~15 | 本地快速压缩（句子边界截断 200 字符） | 最近 5 轮 |
+| Phase 3 | 16+ | 结构化文档 + LLM 深度压缩 | 最近 5 轮 |
+
+**压缩产物格式（Tool-Use 专用摘要）：**
+
+```
+[压缩摘要 轮次 1-10]
+- 执行工具: read×3, get_env×1, jenkins_status×2, bash×1
+- 关键发现: 构建 #42 状态 RUNNING, 环境变量 DEPLOY_TARGET=prod
+- 决策: 用户确认部署到 prod-us-east 区域
+- 错误: bash 超时 1 次，已重试成功
+```
+
+这样 Tool-Use 和对话消息共享同一套压缩机制，无需独立实现。
+
 ## 工具化策略
 
 ### 静态辅助工具（层 2，schema 固定）

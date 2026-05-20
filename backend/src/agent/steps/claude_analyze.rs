@@ -66,6 +66,9 @@ impl Step for ClaudeAnalyzeStep {
                     }],
                     tools: None,
                     temperature: Some(0.0),
+                    tool_choice: None,
+                    stop_sequences: None,
+                    prefill: None,
                 })
                 .await
             {

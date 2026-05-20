@@ -55,6 +55,9 @@ fn test_chat_request_fields() {
         }],
         tools: None,
         temperature: Some(0.7),
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     assert_eq!(req.model, "gpt-4o");
@@ -80,6 +83,9 @@ fn test_chat_request_with_tools() {
         messages: vec![],
         tools: Some(tools),
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     assert!(req.tools.is_some());
@@ -258,6 +264,9 @@ async fn test_mock_provider_chat() {
         }],
         tools: None,
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let resp = mock.llm_call(&req).await.unwrap();
@@ -278,6 +287,9 @@ async fn test_provider_trait_object() {
         messages: vec![],
         tools: None,
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let resp = provider.llm_call(&req).await.unwrap();
@@ -381,6 +393,9 @@ fn test_openai_build_request() {
         ],
         tools: None,
         temperature: Some(0.5),
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let body = adapter.build_request(&req, "default-model");
@@ -413,6 +428,9 @@ fn test_openai_build_request_with_tools() {
         }],
         tools: Some(tools),
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let body = adapter.build_request(&req, "gpt-4o-mini");
@@ -497,6 +515,9 @@ fn test_anthropic_build_request() {
         ],
         tools: None,
         temperature: Some(0.0),
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let body = adapter.build_request(&req, "default-model");
@@ -527,6 +548,9 @@ fn test_anthropic_build_request_with_tools() {
         messages: vec![],
         tools: Some(tools),
         temperature: None,
+    tool_choice: None,
+    stop_sequences: None,
+    prefill: None,
     };
 
     let body = adapter.build_request(&req, "claude-sonnet-4");
