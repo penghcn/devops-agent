@@ -1,5 +1,6 @@
 pub mod build_analysis;
 pub mod claude_code;
+pub mod comparison;
 pub mod jenkins_log;
 pub mod jenkins_status;
 pub mod jenkins_trigger;
@@ -9,6 +10,7 @@ pub mod tool_use_loop;
 
 pub use build_analysis::BuildAnalysisStep;
 pub use claude_code::ClaudeCodeStep;
+pub use comparison::ComparisonStep;
 pub use jenkins_log::JenkinsLogStep;
 pub use jenkins_status::JenkinsStatusStep;
 pub use jenkins_trigger::JenkinsTriggerStep;

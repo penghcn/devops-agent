@@ -544,13 +544,7 @@ impl IntentRouter {
         let (intent, corrections) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
-        let chain = to_chain_with_prompt(
-            &intent,
-            prompt,
-            llm_provider.clone(),
-            llm_model.clone(),
-            config.general_ab_ratio,
-        );
+        let chain = to_chain_with_prompt(&intent, prompt, llm_provider.clone(), llm_model.clone());
 
         let (job_name, branch) = extract_fields(&intent);
 
@@ -901,9 +895,9 @@ mod tests {
 
         // 意图等价 → to_chain_with_prompt 生成的步骤链也等价
         // 因为 chain_mapping 只根据 Intent 枚举类型决定步骤链
-        let _chain1 = to_chain_with_prompt(&intent_exact, "", None, None, 1.0);
-        let _chain2 = to_chain_with_prompt(&intent_branch_fix, "", None, None, 1.0);
-        let _chain3 = to_chain_with_prompt(&intent_both_fix, "", None, None, 1.0);
+        let _chain1 = to_chain_with_prompt(&intent_exact, "", None, None);
+        let _chain2 = to_chain_with_prompt(&intent_branch_fix, "", None, None);
+        let _chain3 = to_chain_with_prompt(&intent_both_fix, "", None, None);
     }
 
     #[tokio::test]
@@ -940,9 +934,9 @@ mod tests {
         );
 
         // 步骤链也一致
-        let chain1 = to_chain_with_prompt(&intent1, "", None, None, 1.0);
-        let chain2 = to_chain_with_prompt(&intent2, "", None, None, 1.0);
-        let chain3 = to_chain_with_prompt(&intent3, "", None, None, 1.0);
+        let chain1 = to_chain_with_prompt(&intent1, "", None, None);
+        let chain2 = to_chain_with_prompt(&intent2, "", None, None);
+        let chain3 = to_chain_with_prompt(&intent3, "", None, None);
         assert!(
             std::mem::discriminant(&intent1) == std::mem::discriminant(&intent2)
                 && std::mem::discriminant(&intent1) == std::mem::discriminant(&intent3),
