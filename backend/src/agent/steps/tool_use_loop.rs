@@ -1,13 +1,15 @@
 //! ToolUseLoopStep — 基于 ToolUseLoop 的 LLM 驱动 Step
 //!
-//! 取代 ClaudeCodeStep 和 ClaudeAnalyzeStep，使用 LLM 原生工具调用能力。
+//! 取代 ClaudeCodeStep 和 BuildAnalysisStep，使用 LLM 原生工具调用能力。
 
 use std::sync::Arc;
 
 use crate::agent::step::{Step, StepContext, StepResult};
 use crate::llm::tool_use_loop::{ToolExecutor, ToolUseLoop, ToolUseResult};
 use crate::llm::{ChatRequest, LlmProvider, Message, ToolDefinition};
-use crate::tools::builtin::{Tool, register_all_builtin};
+use crate::tools::builtin::{
+    Tool, get_heavy_tool_definitions, register_all_builtin, register_heavy_tools,
+};
 
 pub struct ToolUseLoopStep {
     pub prompt: String,
@@ -46,7 +48,7 @@ impl ToolUseLoopStep {
         self
     }
 
-    /// 构建完整的工具定义列表（内置 + 额外）
+    /// 构建完整的工具定义列表（内置 + 重型 + 额外）
     fn build_tools(&self) -> Vec<ToolDefinition> {
         let mut tools = Vec::new();
 
@@ -57,6 +59,9 @@ impl ToolUseLoopStep {
             crate::tools::builtin::GetConfigTool::new(&crate::config::Config::test_default())
                 .definition(),
         );
+
+        // 重型工具定义（Read/Write/Bash/Git）
+        tools.extend(get_heavy_tool_definitions());
 
         // 额外场景工具
         tools.extend(self.extra_tools.iter().cloned());
@@ -85,14 +90,15 @@ impl ToolUseLoopStep {
 #[async_trait::async_trait]
 impl Step for ToolUseLoopStep {
     fn name(&self) -> &str {
-        "ToolUseLoop"
+        "Agent"
     }
 
     fn description(&self, _ctx: &StepContext) -> String {
-        match self.prompt.len() {
+        let prompt_display = match self.prompt.len() {
             n if n <= 60 => self.prompt.clone(),
-            _ => format!("AI 处理: {}", &self.prompt[..60]),
-        }
+            _ => self.prompt[..60].to_string(),
+        };
+        format!("AI 处理 ({}): {}", self.llm_model, prompt_display)
     }
 
     async fn execute(&self, _ctx: &mut StepContext) -> StepResult {
@@ -101,6 +107,7 @@ impl Step for ToolUseLoopStep {
 
         let mut executor = ToolExecutor::new();
         register_all_builtin(&mut executor);
+        register_heavy_tools(&mut executor);
 
         let request = ChatRequest {
             model: self.llm_model.clone(),

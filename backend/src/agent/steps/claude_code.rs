@@ -30,13 +30,13 @@ impl ClaudeCodeStep {
 #[async_trait::async_trait]
 impl Step for ClaudeCodeStep {
     fn name(&self) -> &str {
-        "ClaudeCode"
+        "Agent"
     }
 
     fn description(&self, _ctx: &StepContext) -> String {
         match self.prompt.len() {
-            n if n <= 60 => self.prompt.clone(),
-            _ => format!("AI 处理: {}", &self.prompt[..60]),
+            n if n <= 60 => format!("AI 处理 (CLI): {}", self.prompt),
+            _ => format!("AI 处理 (CLI): {}", &self.prompt[..60]),
         }
     }
 
@@ -63,7 +63,7 @@ impl Step for ClaudeCodeStep {
             {
                 Ok(response) => response.content,
                 Err(e) => {
-                    tracing::warn!(error = %e, "LlmProvider failed, falling back to Claude Code CLI");
+                    tracing::warn!(error = %e, model = %self.llm_model.as_deref().unwrap_or("default"), "LlmProvider failed, falling back to Claude Code CLI");
                     match claude::call_claude_code(&self.prompt, &self.allowed_tools).await {
                         Ok(r) => r,
                         Err(e) => {

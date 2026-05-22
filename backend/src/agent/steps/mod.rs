@@ -1,4 +1,4 @@
-pub mod claude_analyze;
+pub mod build_analysis;
 pub mod claude_code;
 pub mod jenkins_log;
 pub mod jenkins_status;
@@ -7,7 +7,7 @@ pub mod jenkins_wait;
 pub mod job_validate;
 pub mod tool_use_loop;
 
-pub use claude_analyze::ClaudeAnalyzeStep;
+pub use build_analysis::BuildAnalysisStep;
 pub use claude_code::ClaudeCodeStep;
 pub use jenkins_log::JenkinsLogStep;
 pub use jenkins_status::JenkinsStatusStep;

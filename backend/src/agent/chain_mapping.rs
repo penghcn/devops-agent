@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::agent::intent::Intent;
 use crate::agent::step::StepChain;
 use crate::agent::steps::{
-    claude_analyze::ClaudeAnalyzeStep, claude_code::ClaudeCodeStep, jenkins_log::JenkinsLogStep,
+    build_analysis::BuildAnalysisStep, claude_code::ClaudeCodeStep, jenkins_log::JenkinsLogStep,
     jenkins_status::JenkinsStatusStep, jenkins_trigger::JenkinsTriggerStep,
     jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep, tool_use_loop::ToolUseLoopStep,
 };
@@ -22,7 +22,7 @@ pub fn to_chain_with_prompt(
             Box::new(JenkinsTriggerStep),
             Box::new(JenkinsWaitStep::default()),
             Box::new(JenkinsLogStep),
-            Box::new(ClaudeAnalyzeStep::with_provider(
+            Box::new(BuildAnalysisStep::with_provider(
                 llm_provider.clone(),
                 llm_model.clone(),
             )),
@@ -33,7 +33,7 @@ pub fn to_chain_with_prompt(
         Intent::AnalyzeBuild { .. } => StepChain::new(vec![
             Box::new(JobValidateStep),
             Box::new(JenkinsLogStep),
-            Box::new(ClaudeAnalyzeStep::with_provider(llm_provider, llm_model)),
+            Box::new(BuildAnalysisStep::with_provider(llm_provider, llm_model)),
         ]),
         Intent::General => {
             // 优先使用 ToolUseLoop（LLM 原生工具调用），降级到 ClaudeCode
@@ -92,7 +92,7 @@ mod tests {
         let names = chain.step_names();
         assert_eq!(
             names,
-            vec!["ToolUseLoop"],
+            vec!["Agent"],
             "General 意图有 Provider 时应使用 ToolUseLoopStep"
         );
     }
@@ -104,7 +104,7 @@ mod tests {
         let names = chain.step_names();
         assert_eq!(
             names,
-            vec!["ClaudeCode"],
+            vec!["Agent"],
             "General 意图无 Provider 时应降级到 ClaudeCodeStep"
         );
     }
@@ -117,7 +117,7 @@ mod tests {
         let names = chain.step_names();
         assert_eq!(
             names,
-            vec!["ToolUseLoop"],
+            vec!["Agent"],
             "General 意图有 Provider 无 model 时应使用默认 model"
         );
     }
@@ -145,7 +145,7 @@ mod tests {
                 "JenkinsTrigger",
                 "JenkinsWait",
                 "JenkinsLog",
-                "ClaudeAnalyze"
+                "BuildAnalysis"
             ],
             "DeployPipeline 步骤链应保持不变"
         );
@@ -180,7 +180,7 @@ mod tests {
         let names = chain.step_names();
         assert_eq!(
             names,
-            vec!["JobValidate", "JenkinsLog", "ClaudeAnalyze"],
+            vec!["JobValidate", "JenkinsLog", "BuildAnalysis"],
             "AnalyzeBuild 步骤链应保持不变"
         );
     }

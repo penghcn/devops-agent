@@ -5,12 +5,12 @@ use super::super::step::{Step, StepContext, StepResult};
 use crate::llm::{ChatRequest, LlmProvider, Message};
 
 #[derive(Default)]
-pub struct ClaudeAnalyzeStep {
+pub struct BuildAnalysisStep {
     llm_provider: Option<Arc<dyn LlmProvider>>,
     llm_model: Option<String>,
 }
 
-impl ClaudeAnalyzeStep {
+impl BuildAnalysisStep {
     pub fn with_provider(provider: Option<Arc<dyn LlmProvider>>, model: Option<String>) -> Self {
         Self {
             llm_provider: provider,
@@ -20,13 +20,14 @@ impl ClaudeAnalyzeStep {
 }
 
 #[async_trait::async_trait]
-impl Step for ClaudeAnalyzeStep {
+impl Step for BuildAnalysisStep {
     fn name(&self) -> &str {
-        "ClaudeAnalyze"
+        "BuildAnalysis"
     }
 
     fn description(&self, _ctx: &StepContext) -> String {
-        "AI 分析构建结果".to_string()
+        let model_str = self.llm_model.as_deref().unwrap_or("Claude Code CLI");
+        format!("AI 分析构建结果 ({})", model_str)
     }
 
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
@@ -74,7 +75,7 @@ impl Step for ClaudeAnalyzeStep {
             {
                 Ok(response) => response.content,
                 Err(e) => {
-                    tracing::warn!(error = %e, "LlmProvider failed, falling back to Claude Code CLI");
+                    tracing::warn!(error = %e, model = %self.llm_model.as_deref().unwrap_or("default"), "LlmProvider failed, falling back to Claude Code CLI");
                     match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
                         Ok(r) => r,
                         Err(e) => {

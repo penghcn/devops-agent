@@ -97,7 +97,7 @@ backend/src/
 │   ├── mod.rs                 # Agent 入口
 │   ├── intent.rs              # 意图数据结构
 │   ├── router.rs              # 意图路由
-│   ├── chain_mapping.rs       # 意图 → 步骤链映射（General 意图优先用 ToolUseLoop）
+│   ├── chain_mapping.rs       # 意图 → 步骤链映射（General 意图优先用 Agent 步骤）
 │   ├── step.rs                # Step trait + StepChain 执行器
 │   ├── claude.rs              # Claude 交互 Step
 │   └── steps/                 # 业务 Step
@@ -107,9 +107,9 @@ backend/src/
 │       ├── jenkins_wait.rs    # 等待构建完成
 │       ├── jenkins_status.rs  # 查询构建状态
 │       ├── jenkins_log.rs     # 拉取构建日志
-│       ├── claude_analyze.rs  # Claude 分析构建结果
+│       ├── build_analysis.rs  # AI 分析构建结果
 │       ├── claude_code.rs     # Claude 代码生成（降级方案）
-│       └── tool_use_loop.rs   # ToolUseLoopStep：LLM 原生工具调用循环（取代 ClaudeCodeStep）
+│       └── tool_use_loop.rs   # ToolUseLoopStep：LLM 原生工具调用循环（前端展示为 Agent）
 │
 └── frontend/                  # Vue 3.5 + TS + Vite 8 + Tailwind CSS 4 前端（SSE 流式推送）
 ```
@@ -133,9 +133,9 @@ backend/src/
               │
               ├── StepChain → 步骤编排执行（支持 SSE 流式推送）
               │     ├── JobValidate → JenkinsTrigger → JenkinsWait
-              │     └── JenkinsLog → ClaudeAnalyze / ToolUseLoopStep
+              │     └── JenkinsLog → BuildAnalysis / Agent
               │
-              ├── ToolUseLoopStep → LLM 原生工具调用循环
+              ├── Agent(ToolUseLoopStep) → LLM 原生工具调用循环
               │     ├── ToolExecutor：注册 get_time/get_env/get_config 等内置工具
               │     ├── 循环：LLM 返回 tool_calls → 执行工具 → 结果注入 → 再次调用
               │     └── 降级：无 LLM Provider 时回退到 ClaudeCodeStep → Claude Code CLI

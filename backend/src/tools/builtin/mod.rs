@@ -7,7 +7,7 @@ pub mod helpers;
 pub mod read;
 pub mod write;
 
-pub use adapter::register_all_builtin;
+pub use adapter::{get_heavy_tool_definitions, register_all_builtin, register_heavy_tools};
 pub use bash::BashTool;
 pub use git::GitTool;
 pub use helpers::{GetConfigTool, GetEnvTool, GetTimeTool, ToolCache};
