@@ -97,7 +97,7 @@ backend/src/
 │   ├── mod.rs                 # Agent 入口
 │   ├── intent.rs              # 意图数据结构
 │   ├── router.rs              # 意图路由
-│   ├── chain_mapping.rs       # 意图 → 步骤链映射（General 意图优先用 Agent 步骤）
+│   ├── chain_mapping.rs       # 意图 → 步骤链映射（General 意图按 A/B 比例分流到 ToolUseLoop 或 ClaudeCode）
 │   ├── step.rs                # Step trait + StepChain 执行器
 │   ├── claude.rs              # Claude 交互 Step
 │   └── steps/                 # 业务 Step
