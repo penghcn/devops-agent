@@ -955,3 +955,102 @@ mod fallback_tests {
         assert_eq!(result.reason, Some(FallbackReason::Timeout));
     }
 }
+
+// ── Slice 10: DAG 编排 ──
+
+mod dag_orchestrator_tests {
+    use devops_agent::llm::tool_use_loop::{DagNode, DagOrchestrator, DagResult};
+
+    fn make_node(id: &str, deps: &[&str]) -> DagNode {
+        DagNode {
+            id: id.to_string(),
+            task: format!("任务 {}", id),
+            dependencies: deps.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn dag_topological_sort_linear() {
+        let nodes = vec![
+            make_node("A", &[]),
+            make_node("B", &["A"]),
+            make_node("C", &["B"]),
+        ];
+        let orchestrator = DagOrchestrator::new(nodes);
+        let levels = orchestrator.compute_levels();
+        assert_eq!(levels.len(), 3);
+        assert_eq!(levels[0], vec!["A"]);
+        assert_eq!(levels[1], vec!["B"]);
+        assert_eq!(levels[2], vec!["C"]);
+    }
+
+    #[test]
+    fn dag_topological_sort_parallel_levels() {
+        let nodes = vec![
+            make_node("A", &[]),
+            make_node("B", &[]),
+            make_node("C", &["A", "B"]),
+        ];
+        let orchestrator = DagOrchestrator::new(nodes);
+        let levels = orchestrator.compute_levels();
+        assert_eq!(levels.len(), 2);
+        // A and B are independent, should be in the same level
+        assert_eq!(levels[0].len(), 2);
+        assert!(levels[0].contains(&"A"));
+        assert!(levels[0].contains(&"B"));
+        assert_eq!(levels[1], vec!["C"]);
+    }
+
+    #[test]
+    fn dag_cycle_detection() {
+        let nodes = vec![
+            make_node("A", &["C"]),
+            make_node("B", &["A"]),
+            make_node("C", &["B"]),
+        ];
+        let orchestrator = DagOrchestrator::new(nodes);
+        let result = orchestrator.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn dag_missing_dependency_detection() {
+        let nodes = vec![make_node("A", &["NONEXISTENT"])];
+        let orchestrator = DagOrchestrator::new(nodes);
+        let result = orchestrator.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn dag_validate_success() {
+        let nodes = vec![make_node("A", &[]), make_node("B", &["A"])];
+        let orchestrator = DagOrchestrator::new(nodes);
+        let result = orchestrator.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn dag_result_accumulation() {
+        let mut result = DagResult::new();
+        result.record("A", true, "完成");
+        result.record("B", false, "失败");
+        assert_eq!(result.success_count(), 1);
+        assert_eq!(result.failure_count(), 1);
+        assert!(!result.all_success());
+    }
+
+    #[test]
+    fn dag_result_all_success() {
+        let mut result = DagResult::new();
+        result.record("A", true, "完成");
+        result.record("B", true, "完成");
+        assert!(result.all_success());
+    }
+
+    #[test]
+    fn dag_empty_graph() {
+        let orchestrator = DagOrchestrator::new(vec![]);
+        let levels = orchestrator.compute_levels();
+        assert!(levels.is_empty());
+    }
+}
