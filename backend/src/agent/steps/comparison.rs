@@ -58,7 +58,7 @@ impl Step for ComparisonStep {
         let provider = match &self.llm_provider {
             Some(p) => p.clone(),
             None => {
-                return ClaudeCodeStep {
+                let result = ClaudeCodeStep {
                     prompt: self.prompt.clone(),
                     allowed_tools: self.allowed_tools.clone(),
                     llm_provider: None,
@@ -66,6 +66,11 @@ impl Step for ComparisonStep {
                 }
                 .execute(ctx)
                 .await;
+                // 更新 StepChain 创建的占位符
+                if let Some(last) = ctx.steps.last_mut() {
+                    last.result = result_to_string(&result);
+                }
+                return result;
             }
         };
 
@@ -137,6 +142,11 @@ impl Step for ComparisonStep {
             elapsed: Some(second_elapsed),
         });
 
+        // 删除 StepChain 创建的占位符（索引 = 当前长度 - 3）
+        if ctx.steps.len() >= 3 {
+            ctx.steps.remove(ctx.steps.len() - 3);
+        }
+
         // 后端打印耗时对比
         tracing::info!(
             first = %first_name,
@@ -149,8 +159,13 @@ impl Step for ComparisonStep {
             "Comparison complete"
         );
 
-        // 返回最后一个方案的结果（前端只显示这个）
-        second_result
+        // 返回最后一个方案的结果
+        match &second_result {
+            StepResult::Success { message } => StepResult::Success {
+                message: format!("对比成功: {}", message),
+            },
+            _ => second_result,
+        }
     }
 }
 
