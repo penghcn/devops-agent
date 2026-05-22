@@ -118,9 +118,9 @@ fn spawn_llm_health_check(llm_config_store: Arc<LlmConfigStore>) {
                 }],
                 tools: None,
                 temperature: Some(0.0),
-                    tool_choice: None,
-                    stop_sequences: None,
-                    prefill: None,
+                tool_choice: None,
+                stop_sequences: None,
+                prefill: None,
             };
             match tokio::time::timeout(std::time::Duration::from_secs(15), router.llm_call(&req))
                 .await
