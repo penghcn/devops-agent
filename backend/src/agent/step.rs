@@ -133,6 +133,11 @@ impl StepChain {
         Self { steps }
     }
 
+    /// 返回链中所有步骤的名称（用于测试观测）
+    pub fn step_names(&self) -> Vec<&str> {
+        self.steps.iter().map(|s| s.name()).collect()
+    }
+
     pub async fn execute(&self, ctx: StepContext) -> (StepContext, Vec<super::AgentStep>) {
         let mut ctx = ctx;
         let mut final_steps = Vec::new();
@@ -198,6 +203,7 @@ impl StepChain {
 
             // 推送 StepStart
             let desc = step.description(&ctx);
+            tracing::info!(step = %step_name, description = %desc, "StepStart");
             let _ = sender
                 .send(super::StreamEvent::StepStart {
                     step_index: i,
@@ -229,6 +235,7 @@ impl StepChain {
             final_steps = ctx.steps.clone();
 
             // 推送 StepDone
+            tracing::info!(step = %step_name, result = %step_result, elapsed_s = total_elapsed, "StepDone");
             let _ = sender
                 .send(super::StreamEvent::StepDone {
                     step_index: i,

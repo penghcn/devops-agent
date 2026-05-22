@@ -16,12 +16,6 @@ use super::{ChatRequest, Message, ToolDefinition};
 /// 层 1~3 预编译的静态前缀
 #[derive(Debug, Clone)]
 pub struct StaticPrefix {
-    /// 层 1: 角色定位 + 行为准则 + 安全红线 + 输出格式
-    system_core: String,
-    /// 层 2: 核心工具行为指南
-    tool_guidelines: String,
-    /// 层 3: 项目规则（CLAUDE.md 等）
-    project_rules: String,
     /// 拼接后的完整前缀（启动时预编译）
     compiled: String,
 }
@@ -33,12 +27,7 @@ impl StaticPrefix {
             "{}\n\n{}\n\n{}",
             system_core, tool_guidelines, project_rules
         );
-        Self {
-            system_core,
-            tool_guidelines,
-            project_rules,
-            compiled,
-        }
+        Self { compiled }
     }
 
     /// 获取预编译的完整前缀
@@ -395,6 +384,6 @@ mod tests {
     #[test]
     fn test_estimate_tokens() {
         assert!((estimate_tokens("你好") as i32 - 3).abs() <= 1);
-        assert!(estimate_tokens("Hi") >= 0);
+        assert!(estimate_tokens("Hi") > 0); // TODO 当前 >= 0 恒成立，后续优化
     }
 }
