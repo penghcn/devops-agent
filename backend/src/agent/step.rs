@@ -138,6 +138,12 @@ impl StepChain {
         self.steps.iter().map(|s| s.name()).collect()
     }
 
+    /// 返回链中所有步骤的描述（用于测试区分 ClaudeCode vs ToolUseLoop）
+    #[cfg(test)]
+    pub(crate) fn step_descriptions(&self, ctx: &StepContext) -> Vec<String> {
+        self.steps.iter().map(|s| s.description(ctx)).collect()
+    }
+
     pub async fn execute(&self, ctx: StepContext) -> (StepContext, Vec<super::AgentStep>) {
         let mut ctx = ctx;
         let mut final_steps = Vec::new();

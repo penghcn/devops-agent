@@ -88,6 +88,7 @@ fn simple_hash(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::step::StepContext;
     use crate::llm::{ChatRequest, ChatResponse, LlmError};
     use async_trait::async_trait;
 
@@ -214,6 +215,42 @@ mod tests {
             names,
             vec!["JobValidate", "JenkinsLog", "BuildAnalysis"],
             "AnalyzeBuild 步骤链应保持不变"
+        );
+    }
+
+    #[test]
+    fn general_ab_split_intermediate_ratio() {
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
+        let config = Arc::new(crate::config::Config::test_default());
+        let ctx = StepContext::new("test".to_string(), Default::default(), None, None, config);
+
+        // ratio=0.5: hash%100 < 50 → ToolUseLoop, >= 50 → ClaudeCode
+        // "test 30" → hash%100=20 < 50 → ToolUseLoop
+        let chain_low = to_chain_with_prompt(
+            &Intent::General,
+            "test 30",
+            Some(provider.clone()),
+            Some("gpt-4o-mini".to_string()),
+            0.5,
+        );
+        let descs_low = chain_low.step_descriptions(&ctx);
+        assert!(
+            !descs_low.first().unwrap().contains("(CLI)"),
+            "hash%100=20 < 50 时应走 ToolUseLoop"
+        );
+
+        // "test 0" → hash%100=81 >= 50 → ClaudeCode
+        let chain_high = to_chain_with_prompt(
+            &Intent::General,
+            "test 0",
+            Some(provider.clone()),
+            Some("gpt-4o-mini".to_string()),
+            0.5,
+        );
+        let descs_high = chain_high.step_descriptions(&ctx);
+        assert!(
+            descs_high.first().unwrap().contains("(CLI)"),
+            "hash%100=81 >= 50 时应走 ClaudeCode 降级路径"
         );
     }
 }
