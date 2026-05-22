@@ -51,6 +51,22 @@ impl Tool for ReadTool {
         "Read"
     }
 
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "Read".to_string(),
+            description: "安全读取文件内容。支持指定路径和行范围。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径"},
+                    "offset": {"type": "integer", "description": "起始行号（可选）"},
+                    "limit": {"type": "integer", "description": "读取行数（可选）"}
+                },
+                "required": ["path"]
+            }),
+        }
+    }
+
     async fn execute(&self, input: &ToolInput) -> ToolOutput {
         let raw_path = match &input.path {
             Some(p) => p.clone(),

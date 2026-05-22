@@ -42,6 +42,21 @@ impl Tool for BashTool {
         "Bash"
     }
 
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "Bash".to_string(),
+            description: "在沙箱中执行 Shell 命令。仅允许白名单命令。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "要执行的命令"},
+                    "args": {"type": "array", "items": {"type": "string"}, "description": "命令参数"}
+                },
+                "required": ["command"]
+            }),
+        }
+    }
+
     async fn execute(&self, input: &ToolInput) -> ToolOutput {
         if input.arguments.is_empty() {
             return ToolOutput::fail("缺少命令参数".into());

@@ -5,7 +5,7 @@ use crate::agent::step::StepChain;
 use crate::agent::steps::{
     claude_analyze::ClaudeAnalyzeStep, claude_code::ClaudeCodeStep, jenkins_log::JenkinsLogStep,
     jenkins_status::JenkinsStatusStep, jenkins_trigger::JenkinsTriggerStep,
-    jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep,
+    jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep, tool_use_loop::ToolUseLoopStep,
 };
 use crate::llm::LlmProvider;
 
@@ -22,7 +22,10 @@ pub fn to_chain_with_prompt(
             Box::new(JenkinsTriggerStep),
             Box::new(JenkinsWaitStep::default()),
             Box::new(JenkinsLogStep),
-            Box::new(ClaudeAnalyzeStep::with_provider(llm_provider, llm_model)),
+            Box::new(ClaudeAnalyzeStep::with_provider(
+                llm_provider.clone(),
+                llm_model.clone(),
+            )),
         ]),
         Intent::QueryPipeline { .. } => {
             StepChain::new(vec![Box::new(JobValidateStep), Box::new(JenkinsStatusStep)])
@@ -32,11 +35,23 @@ pub fn to_chain_with_prompt(
             Box::new(JenkinsLogStep),
             Box::new(ClaudeAnalyzeStep::with_provider(llm_provider, llm_model)),
         ]),
-        Intent::General => StepChain::new(vec![Box::new(ClaudeCodeStep {
-            prompt: prompt.to_string(),
-            allowed_tools: "Bash,Read,Write".to_string(),
-            llm_provider,
-            llm_model,
-        })]),
+        Intent::General => {
+            // 优先使用 ToolUseLoop（LLM 原生工具调用），降级到 ClaudeCode
+            if let Some(provider) = llm_provider {
+                let model = llm_model.unwrap_or_else(|| "gpt-4o-mini".to_string());
+                StepChain::new(vec![Box::new(ToolUseLoopStep::new(
+                    prompt.to_string(),
+                    provider,
+                    model,
+                ))])
+            } else {
+                StepChain::new(vec![Box::new(ClaudeCodeStep {
+                    prompt: prompt.to_string(),
+                    allowed_tools: "Bash,Read,Write".to_string(),
+                    llm_provider: None,
+                    llm_model: None,
+                })])
+            }
+        }
     }
 }

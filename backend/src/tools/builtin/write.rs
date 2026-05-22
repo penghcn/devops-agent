@@ -51,6 +51,21 @@ impl Tool for WriteTool {
         "Write"
     }
 
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "Write".to_string(),
+            description: "写入文件内容。有大小限制（默认5MB）。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "文件路径"},
+                    "content": {"type": "string", "description": "写入内容"}
+                },
+                "required": ["path", "content"]
+            }),
+        }
+    }
+
     async fn execute(&self, input: &ToolInput) -> ToolOutput {
         let raw_path = match &input.path {
             Some(p) => p.clone(),

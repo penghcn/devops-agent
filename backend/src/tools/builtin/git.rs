@@ -49,6 +49,21 @@ impl Tool for GitTool {
         "Git"
     }
 
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "Git".to_string(),
+            description: "执行 Git 操作。禁止 push/remote/fetch/clone/submodule。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "subcommand": {"type": "string", "description": "Git 子命令"},
+                    "args": {"type": "array", "items": {"type": "string"}, "description": "额外参数"}
+                },
+                "required": ["subcommand"]
+            }),
+        }
+    }
+
     async fn execute(&self, input: &ToolInput) -> ToolOutput {
         if input.arguments.is_empty() {
             return ToolOutput::fail("缺少 git 子命令".into());

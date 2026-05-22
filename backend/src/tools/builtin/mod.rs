@@ -1,17 +1,20 @@
 use serde::{Deserialize, Serialize};
 
+pub mod adapter;
 pub mod bash;
 pub mod git;
 pub mod helpers;
 pub mod read;
 pub mod write;
 
+pub use adapter::register_all_builtin;
 pub use bash::BashTool;
 pub use git::GitTool;
 pub use helpers::{GetConfigTool, GetEnvTool, GetTimeTool, ToolCache};
 pub use read::ReadTool;
 pub use write::WriteTool;
 
+use crate::llm::ToolDefinition;
 use crate::security::roles::Role;
 
 /// 工具输入参数
@@ -61,6 +64,18 @@ impl ToolOutput {
 pub trait Tool {
     /// 工具名称
     fn name(&self) -> &str;
+
+    /// 返回工具的 LLM 定义（名称、描述、参数 Schema）
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.name().to_string(),
+            description: String::new(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        }
+    }
 
     /// 执行工具
     async fn execute(&self, input: &ToolInput) -> ToolOutput;

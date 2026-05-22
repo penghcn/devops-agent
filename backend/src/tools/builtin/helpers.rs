@@ -103,6 +103,17 @@ impl Tool for GetTimeTool {
         "get_time"
     }
 
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "get_time".to_string(),
+            description: "获取当前时间（ISO 8601 + Unix 时间戳）。结果会缓存1分钟。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        }
+    }
+
     async fn execute(&self, _input: &ToolInput) -> ToolOutput {
         let cache_key = "get_time:now".to_string();
 
@@ -140,6 +151,20 @@ impl GetEnvTool {
 impl Tool for GetEnvTool {
     fn name(&self) -> &str {
         "get_env"
+    }
+
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "get_env".to_string(),
+            description: "读取白名单内的环境变量。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "环境变量名称"}
+                },
+                "required": ["name"]
+            }),
+        }
     }
 
     async fn execute(&self, input: &ToolInput) -> ToolOutput {
@@ -207,6 +232,19 @@ impl GetConfigTool {
 impl Tool for GetConfigTool {
     fn name(&self) -> &str {
         "get_config"
+    }
+
+    fn definition(&self) -> crate::llm::ToolDefinition {
+        crate::llm::ToolDefinition {
+            name: "get_config".to_string(),
+            description: "读取项目配置项。不传入参数时列出所有可用配置项。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "配置路径，如 server.port"}
+                }
+            }),
+        }
     }
 
     async fn execute(&self, input: &ToolInput) -> ToolOutput {

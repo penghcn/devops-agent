@@ -57,7 +57,8 @@ backend/src/
 ├── tools/                     # 工具集
 │   ├── mod.rs
 │   ├── builtin/               # 内置工具
-│   │   ├── mod.rs
+│   │   ├── mod.rs             # Tool trait（含 definition()方法返回 LLM schema）
+│   │   ├── adapter.rs         # 适配器：将 builtin Tool 注册到 ToolUseLoop ToolExecutor
 │   │   ├── read.rs            # 安全文件读取
 │   │   ├── write.rs           # 文件写入
 │   │   ├── bash.rs            # 命令执行（白名单校验）
@@ -67,7 +68,7 @@ backend/src/
 │   ├── jenkins_cache.rs       # 构建缓存
 │   └── gitlab.rs              # GitLab API 封装
 │
-├── llm/                       # LLM 提供商抽象 + Prompt 构建
+├── llm/                       # LLM 提供商抽象 + Prompt 构建 + ToolUseLoop
 │   ├── mod.rs                 # LlmProvider trait + Message/ChatRequest 等类型
 │   ├── router.rs              # ModelRouter：L1/L2 任务分类 + provider 路由
 │   ├── structured_output.rs   # Schema 强约束输出
@@ -75,6 +76,15 @@ backend/src/
 │   │   ├── StaticPrefix       # 层 1~3 预编译缓存（静态 System + 工具指南 + 项目规则）
 │   │   ├── SessionSlots       # 层 5 结构化槽位（目标 + 步骤 + 错误）
 │   │   └── MemorySlot         # 层 4 高分记忆过滤注入
+│   ├── tool_use_loop/         # LLM ↔ 工具调用闭环（拆分后 8 子模块）
+│   │   ├── mod.rs             # ToolUseLoop 核心循环 + ToolCallResult/ToolUseResult
+│   │   ├── executor.rs        # ToolExecutor：注册、分派、批量执行、并行安全分级
+│   │   ├── retry.rs           # ToolErrorKind + RetryPolicy（指数退避）
+│   │   ├── loop_detector.rs   # 死循环检测器（滑动窗口 + 签名匹配）
+│   │   ├── signal_voter.rs    # 信号投票器（负面信号收集 + 升级判断）
+│   │   ├── tool_registry.rs   # 工具注册表（精确/同义词/子串搜索 + 分类召回）
+│   │   ├── fallback.rs        # 降级处理器（交接 Claude Code CLI）
+│   │   └── dag.rs             # DAG 编排器（拓扑排序 + 层级并行）
 │   └── provider/              # Provider 实现（适配器模式）
 │       ├── mod.rs
 │       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>
@@ -87,7 +97,7 @@ backend/src/
 │   ├── mod.rs                 # Agent 入口
 │   ├── intent.rs              # 意图数据结构
 │   ├── router.rs              # 意图路由
-│   ├── chain_mapping.rs       # 意图 → 步骤链映射
+│   ├── chain_mapping.rs       # 意图 → 步骤链映射（General 意图优先用 ToolUseLoop）
 │   ├── step.rs                # Step trait + StepChain 执行器
 │   ├── claude.rs              # Claude 交互 Step
 │   └── steps/                 # 业务 Step
@@ -98,7 +108,8 @@ backend/src/
 │       ├── jenkins_status.rs  # 查询构建状态
 │       ├── jenkins_log.rs     # 拉取构建日志
 │       ├── claude_analyze.rs  # Claude 分析构建结果
-│       └── claude_code.rs     # Claude 代码生成
+│       ├── claude_code.rs     # Claude 代码生成（降级方案）
+│       └── tool_use_loop.rs   # ToolUseLoopStep：LLM 原生工具调用循环（取代 ClaudeCodeStep）
 │
 └── frontend/                  # Vue 3.5 + TS + Vite 8 + Tailwind CSS 4 前端（SSE 流式推送）
 ```
@@ -122,7 +133,12 @@ backend/src/
               │
               ├── StepChain → 步骤编排执行（支持 SSE 流式推送）
               │     ├── JobValidate → JenkinsTrigger → JenkinsWait
-              │     └── JenkinsLog → ClaudeAnalyze / ClaudeCode
+              │     └── JenkinsLog → ClaudeAnalyze / ToolUseLoopStep
+              │
+              ├── ToolUseLoopStep → LLM 原生工具调用循环
+              │     ├── ToolExecutor：注册 get_time/get_env/get_config 等内置工具
+              │     ├── 循环：LLM 返回 tool_calls → 执行工具 → 结果注入 → 再次调用
+              │     └── 降级：无 LLM Provider 时回退到 ClaudeCodeStep → Claude Code CLI
               │
               └── Harness Orchestrator → 编排核心
                     ├── Hook: Token (Token 预算追踪)
