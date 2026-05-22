@@ -62,6 +62,8 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     pub api_key: Option<String>,
     pub sandbox: SandboxConfig,
+    /// General 意图 A/B 分流比例：0.0 = 100% ClaudeCode, 1.0 = 100% ToolUseLoop, 默认 1.0
+    pub general_ab_ratio: f64,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -263,6 +265,11 @@ impl Config {
         let cubesandbox_envd_url_template =
             conf_get(&conf, "sandbox.cubesandbox.envd_url_template").unwrap_or_default();
 
+        let general_ab_ratio = conf
+            .get("general.ab_ratio")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0);
+
         let sandbox = SandboxConfig {
             backends: sandbox_backends,
             timeout_secs: sandbox_timeout_secs,
@@ -293,6 +300,7 @@ impl Config {
             cors_origins,
             api_key,
             sandbox,
+            general_ab_ratio,
         };
 
         config.validate_llm()
@@ -348,6 +356,7 @@ impl Config {
                 cubesandbox_envd_port: 49983,
                 cubesandbox_envd_url_template: String::new(),
             },
+            general_ab_ratio: 1.0,
         }
     }
 }

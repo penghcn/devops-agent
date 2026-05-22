@@ -18,7 +18,8 @@ use super::{Tool, ToolInput, ToolOutput};
 /// 注册所有内置简单工具（不依赖沙箱的工具）到 ToolExecutor。
 ///
 /// 这些工具不需要沙箱、策略引擎等基础设施，适合在 ToolUseLoop 中直接使用。
-pub fn register_all_builtin(executor: &mut ToolExecutor) {
+pub fn register_all_builtin(executor: &mut ToolExecutor, config: &crate::config::Config) {
+    let config = Arc::new(config.clone());
     executor.register(
         "get_time",
         ToolRegistration::safe(|args| {
@@ -47,14 +48,17 @@ pub fn register_all_builtin(executor: &mut ToolExecutor) {
 
     executor.register(
         "get_config",
-        ToolRegistration::safe(move |args| {
-            let args = args.clone();
-            async move {
-                let config = crate::config::Config::test_default();
-                let tool = super::GetConfigTool::new(&config);
-                let input = to_tool_input(&args);
-                let output = tool.execute(&input).await;
-                to_call_result(output)
+        ToolRegistration::safe({
+            let config = config.clone();
+            move |args| {
+                let args = args.clone();
+                let config = config.clone();
+                async move {
+                    let tool = super::GetConfigTool::new(&config);
+                    let input = to_tool_input(&args);
+                    let output = tool.execute(&input).await;
+                    to_call_result(output)
+                }
             }
         }),
     );

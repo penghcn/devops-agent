@@ -49,16 +49,13 @@ impl ToolUseLoopStep {
     }
 
     /// 构建完整的工具定义列表（内置 + 重型 + 额外）
-    fn build_tools(&self) -> Vec<ToolDefinition> {
+    fn build_tools(&self, config: &crate::config::Config) -> Vec<ToolDefinition> {
         let mut tools = Vec::new();
 
         // 内置简单工具定义
         tools.push(crate::tools::builtin::GetTimeTool::new().definition());
         tools.push(crate::tools::builtin::GetEnvTool::new().definition());
-        tools.push(
-            crate::tools::builtin::GetConfigTool::new(&crate::config::Config::test_default())
-                .definition(),
-        );
+        tools.push(crate::tools::builtin::GetConfigTool::new(config).definition());
 
         // 重型工具定义（Read/Write/Bash/Git）
         tools.extend(get_heavy_tool_definitions());
@@ -101,12 +98,12 @@ impl Step for ToolUseLoopStep {
         format!("AI 处理 ({}): {}", self.llm_model, prompt_display)
     }
 
-    async fn execute(&self, _ctx: &mut StepContext) -> StepResult {
-        let tools = self.build_tools();
+    async fn execute(&self, ctx: &mut StepContext) -> StepResult {
+        let tools = self.build_tools(&ctx.config);
         let messages = self.build_messages();
 
         let mut executor = ToolExecutor::new();
-        register_all_builtin(&mut executor);
+        register_all_builtin(&mut executor, &ctx.config);
         register_heavy_tools(&mut executor);
 
         let request = ChatRequest {

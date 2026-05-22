@@ -165,6 +165,7 @@ async fn process_request_stream(
         &req.prompt,
         llm_provider.clone(),
         default_model.clone(),
+        config.general_ab_ratio,
     );
 
     let (job_name, branch) = crate::agent::intent::extract_fields(&intent);

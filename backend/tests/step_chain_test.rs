@@ -147,7 +147,7 @@ fn test_chain_deploy_pipeline() {
         branch: Some("dev".to_string()),
         job_type: Default::default(),
     };
-    let _chain = to_chain_with_prompt(&intent, "部署 ds-pkg", None, None);
+    let _chain = to_chain_with_prompt(&intent, "部署 ds-pkg", None, None, 1.0);
     // StepChain 内部 steps 是私有字段，无法直接测试数量
     // 但可以通过 execute 端到端验证
 }
@@ -164,6 +164,6 @@ fn test_chain_query_pipeline() {
         branch: Some("dev".to_string()),
         job_type: Default::default(),
     };
-    let _chain = to_chain_with_prompt(&intent, "查询 ds-pkg dev 状态", None, None);
+    let _chain = to_chain_with_prompt(&intent, "查询 ds-pkg dev 状态", None, None, 1.0);
     // 同上，端到端验证
 }

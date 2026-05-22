@@ -15,6 +15,7 @@ pub fn to_chain_with_prompt(
     prompt: &str,
     llm_provider: Option<Arc<dyn LlmProvider>>,
     llm_model: Option<String>,
+    general_ab_ratio: f64,
 ) -> StepChain {
     match intent {
         Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
@@ -36,15 +37,34 @@ pub fn to_chain_with_prompt(
             Box::new(BuildAnalysisStep::with_provider(llm_provider, llm_model)),
         ]),
         Intent::General => {
-            // 优先使用 ToolUseLoop（LLM 原生工具调用），降级到 ClaudeCode
+            // A/B 分流：根据 prompt 哈希值分流，保证同一请求稳定走同一条路径
+            let use_tool_use_loop = if general_ab_ratio >= 1.0 {
+                true
+            } else if general_ab_ratio <= 0.0 {
+                false
+            } else {
+                let hash = simple_hash(prompt);
+                (hash % 100) < (general_ab_ratio * 100.0) as u64
+            };
+
             if let Some(provider) = llm_provider {
                 let model = llm_model.unwrap_or_else(|| "gpt-4o-mini".to_string());
-                StepChain::new(vec![Box::new(ToolUseLoopStep::new(
-                    prompt.to_string(),
-                    provider,
-                    model,
-                ))])
+                if use_tool_use_loop {
+                    StepChain::new(vec![Box::new(ToolUseLoopStep::new(
+                        prompt.to_string(),
+                        provider,
+                        model,
+                    ))])
+                } else {
+                    StepChain::new(vec![Box::new(ClaudeCodeStep {
+                        prompt: prompt.to_string(),
+                        allowed_tools: "Bash,Read,Write".to_string(),
+                        llm_provider: Some(provider),
+                        llm_model: Some(model),
+                    })])
+                }
             } else {
+                // 无 Provider 时降级到 Claude Code CLI
                 StepChain::new(vec![Box::new(ClaudeCodeStep {
                     prompt: prompt.to_string(),
                     allowed_tools: "Bash,Read,Write".to_string(),
@@ -54,6 +74,15 @@ pub fn to_chain_with_prompt(
             }
         }
     }
+}
+
+/// 简单的字符串哈希，用于 A/B 分流
+fn simple_hash(s: &str) -> u64 {
+    let mut hash: u64 = 5381;
+    for c in s.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(c as u64);
+    }
+    hash
 }
 
 #[cfg(test)]
@@ -87,6 +116,7 @@ mod tests {
             "test prompt",
             Some(provider),
             Some("gpt-4o-mini".to_string()),
+            1.0,
         );
 
         let names = chain.step_names();
@@ -99,7 +129,7 @@ mod tests {
 
     #[test]
     fn general_without_provider_falls_back_to_claude_code() {
-        let chain = to_chain_with_prompt(&Intent::General, "test prompt", None, None);
+        let chain = to_chain_with_prompt(&Intent::General, "test prompt", None, None, 1.0);
 
         let names = chain.step_names();
         assert_eq!(
@@ -112,7 +142,8 @@ mod tests {
     #[test]
     fn general_without_model_uses_default() {
         let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
-        let chain = to_chain_with_prompt(&Intent::General, "test prompt", Some(provider), None);
+        let chain =
+            to_chain_with_prompt(&Intent::General, "test prompt", Some(provider), None, 1.0);
 
         let names = chain.step_names();
         assert_eq!(
@@ -135,6 +166,7 @@ mod tests {
             "deploy test",
             Some(provider),
             Some("gpt-4o-mini".to_string()),
+            1.0,
         );
 
         let names = chain.step_names();
@@ -158,7 +190,7 @@ mod tests {
             branch: Some("main".to_string()),
             job_type: crate::agent::intent::JobType::Standard,
         };
-        let chain = to_chain_with_prompt(&intent, "query test", None, None);
+        let chain = to_chain_with_prompt(&intent, "query test", None, None, 1.0);
 
         let names = chain.step_names();
         assert_eq!(
@@ -175,7 +207,7 @@ mod tests {
             branch: Some("main".to_string()),
             job_type: crate::agent::intent::JobType::Standard,
         };
-        let chain = to_chain_with_prompt(&intent, "analyze test", None, None);
+        let chain = to_chain_with_prompt(&intent, "analyze test", None, None, 1.0);
 
         let names = chain.step_names();
         assert_eq!(
