@@ -13,8 +13,8 @@ use crate::llm::LlmProvider;
 pub fn to_chain_with_prompt(
     intent: &Intent,
     prompt: &str,
-    llm_provider: Option<Arc<dyn LlmProvider>>,
-    llm_model: Option<String>,
+    llm_provider: Arc<dyn LlmProvider>,
+    llm_model: String,
 ) -> StepChain {
     match intent {
         Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
@@ -39,8 +39,8 @@ pub fn to_chain_with_prompt(
             // 两个方案都跑，随机顺序，对比耗时
             StepChain::new(vec![Box::new(ComparisonStep::new(
                 prompt.to_string(),
-                llm_provider,
-                llm_model,
+                Some(llm_provider),
+                Some(llm_model),
             ))])
         }
     }
@@ -74,8 +74,8 @@ mod tests {
         let chain = to_chain_with_prompt(
             &Intent::General,
             "test prompt",
-            Some(provider),
-            Some("gpt-4o-mini".to_string()),
+            provider,
+            "gpt-4o-mini".to_string(),
         );
 
         let names = chain.step_names();
@@ -88,14 +88,16 @@ mod tests {
 
     #[test]
     fn general_without_provider_returns_comparison() {
-        let chain = to_chain_with_prompt(&Intent::General, "test prompt", None, None);
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
+        let chain = to_chain_with_prompt(
+            &Intent::General,
+            "test prompt",
+            provider,
+            "gpt-4o-mini".to_string(),
+        );
 
         let names = chain.step_names();
-        assert_eq!(
-            names,
-            vec!["Agent"],
-            "General 意图无 Provider 时仍返回 ComparisonStep（内部降级）"
-        );
+        assert_eq!(names, vec!["Agent"], "General 意图返回 ComparisonStep");
     }
 
     #[test]
@@ -106,12 +108,8 @@ mod tests {
             branch: Some("main".to_string()),
             job_type: crate::agent::intent::JobType::Standard,
         };
-        let chain = to_chain_with_prompt(
-            &intent,
-            "deploy test",
-            Some(provider),
-            Some("gpt-4o-mini".to_string()),
-        );
+        let chain =
+            to_chain_with_prompt(&intent, "deploy test", provider, "gpt-4o-mini".to_string());
 
         let names = chain.step_names();
         assert_eq!(
@@ -134,7 +132,9 @@ mod tests {
             branch: Some("main".to_string()),
             job_type: crate::agent::intent::JobType::Standard,
         };
-        let chain = to_chain_with_prompt(&intent, "query test", None, None);
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
+        let chain =
+            to_chain_with_prompt(&intent, "query test", provider, "gpt-4o-mini".to_string());
 
         let names = chain.step_names();
         assert_eq!(
@@ -151,7 +151,9 @@ mod tests {
             branch: Some("main".to_string()),
             job_type: crate::agent::intent::JobType::Standard,
         };
-        let chain = to_chain_with_prompt(&intent, "analyze test", None, None);
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
+        let chain =
+            to_chain_with_prompt(&intent, "analyze test", provider, "gpt-4o-mini".to_string());
 
         let names = chain.step_names();
         assert_eq!(

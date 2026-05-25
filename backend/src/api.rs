@@ -146,17 +146,13 @@ async fn process_request_stream(
     sender: Arc<tokio::sync::mpsc::Sender<StreamEvent>>,
 ) -> AgentResponse {
     let llm_provider = store.build_router();
-    let default_model = store.snapshot().default_model_flash();
+    let default_model = store
+        .snapshot()
+        .default_model_flash()
+        .unwrap_or_else(|| "gpt-4o-mini".to_string());
 
-    let intent_router = if let Some(ref provider) = llm_provider {
-        crate::agent::IntentRouter::with_llm(
-            cache.clone(),
-            provider.clone(),
-            default_model.as_deref().unwrap_or("gpt-4o-mini"),
-        )
-    } else {
-        crate::agent::IntentRouter::new(cache)
-    };
+    let intent_router =
+        crate::agent::IntentRouter::with_llm(cache.clone(), llm_provider.clone(), &default_model);
 
     let (intent, corrections) = intent_router.identify(&req.prompt).await;
 
@@ -169,28 +165,16 @@ async fn process_request_stream(
 
     let (job_name, branch) = crate::agent::intent::extract_fields(&intent);
 
-    let mut ctx = if let Some(provider) = llm_provider {
-        let model = default_model.unwrap_or_else(|| "gpt-4o-mini".to_string());
-        crate::agent::StepContext::new(
-            req.prompt.clone(),
-            req.task_type,
-            job_name,
-            branch,
-            Arc::new(config.clone()),
-        )
-        .with_cache(intent_router.cache().clone())
-        .with_llm_provider(provider)
-        .with_llm_model(model)
-    } else {
-        crate::agent::StepContext::new(
-            req.prompt.clone(),
-            req.task_type,
-            job_name,
-            branch,
-            Arc::new(config.clone()),
-        )
-        .with_cache(intent_router.cache().clone())
-    };
+    let mut ctx = crate::agent::StepContext::new(
+        req.prompt.clone(),
+        req.task_type,
+        job_name,
+        branch,
+        Arc::new(config.clone()),
+    )
+    .with_cache(intent_router.cache().clone())
+    .with_llm_provider(llm_provider)
+    .with_llm_model(default_model);
 
     for c in &corrections {
         ctx = ctx.add_correction(c.kind.clone(), c.original.clone(), c.corrected.clone());

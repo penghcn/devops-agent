@@ -104,13 +104,7 @@ fn spawn_llm_health_check(llm_config_store: Arc<LlmConfigStore>) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
         loop {
             interval.tick().await;
-            let router = match llm_config_store.build_router() {
-                Some(r) => r,
-                None => {
-                    tracing::warn!("No LLM provider configured for health check");
-                    continue;
-                }
-            };
+            let router = llm_config_store.build_router();
             let req = ChatRequest {
                 model: String::new(),
                 messages: vec![Message::User {

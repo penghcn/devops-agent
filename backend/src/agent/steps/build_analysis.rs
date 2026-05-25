@@ -1,17 +1,17 @@
-use std::sync::Arc;
-
 use super::super::claude;
 use super::super::step::{Step, StepContext, StepResult};
 use crate::llm::{ChatRequest, LlmProvider, Message};
+use std::sync::Arc;
+use std::time::Instant;
 
-#[derive(Default)]
+//#[derive(Default)]
 pub struct BuildAnalysisStep {
-    llm_provider: Option<Arc<dyn LlmProvider>>,
-    llm_model: Option<String>,
+    llm_provider: Arc<dyn LlmProvider>,
+    llm_model: String,
 }
 
 impl BuildAnalysisStep {
-    pub fn with_provider(provider: Option<Arc<dyn LlmProvider>>, model: Option<String>) -> Self {
+    pub fn with_provider(provider: Arc<dyn LlmProvider>, model: String) -> Self {
         Self {
             llm_provider: provider,
             llm_model: model,
@@ -26,8 +26,7 @@ impl Step for BuildAnalysisStep {
     }
 
     fn description(&self, _ctx: &StepContext) -> String {
-        let model_str = self.llm_model.as_deref().unwrap_or("Claude Code CLI");
-        format!("AI 分析构建结果 ({})", model_str)
+        format!("AI 分析构建结果 ({})", &self.llm_model)
     }
 
     async fn execute(&self, ctx: &mut StepContext) -> StepResult {
@@ -53,49 +52,59 @@ impl Step for BuildAnalysisStep {
             build_failure_analysis_prompt(log, result)
         };
 
-        let raw_result = if let Some(provider) = &self.llm_provider {
-            let model = self
-                .llm_model
-                .as_deref()
-                .unwrap_or("gpt-4o-mini")
-                .to_string();
-            match provider
-                .llm_call(&ChatRequest {
-                    model,
-                    messages: vec![Message::User {
-                        content: prompt.clone(),
-                    }],
-                    tools: None,
-                    temperature: Some(0.0),
-                    tool_choice: None,
-                    stop_sequences: None,
-                    prefill: None,
-                })
-                .await
-            {
-                Ok(response) => response.content,
-                Err(e) => {
-                    tracing::warn!(error = %e, model = %self.llm_model.as_deref().unwrap_or("default"), "LlmProvider failed, falling back to Claude Code CLI");
-                    match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
-                        Ok(r) => r,
-                        Err(e) => {
-                            return StepResult::Failed {
-                                error: e.to_string(),
-                            };
-                        }
-                    }
-                }
-            }
-        } else {
-            match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
-                Ok(r) => r,
-                Err(e) => {
-                    return StepResult::Failed {
-                        error: e.to_string(),
-                    };
-                }
+        // let raw_result = if let Some(provider) = &self.llm_provider {
+        //     let model = self
+        //         .llm_model
+        //         .as_deref()
+        //         .unwrap_or("gpt-4o-mini")
+        //         .to_string();
+        //     match provider
+        //         .llm_call(&ChatRequest {
+        //             model,
+        //             messages: vec![Message::User {
+        //                 content: prompt.clone(),
+        //             }],
+        //             tools: None,
+        //             temperature: Some(0.0),
+        //             tool_choice: None,
+        //             stop_sequences: None,
+        //             prefill: None,
+        //         })
+        //         .await
+        //     {
+        //         Ok(response) => response.content,
+        //         Err(e) => {
+        //             tracing::warn!(error = %e, model = %self.llm_model.as_deref().unwrap_or("default"), "LlmProvider failed, falling back to Claude Code CLI");
+        //             match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
+        //                 Ok(r) => r,
+        //                 Err(e) => {
+        //                     return StepResult::Failed {
+        //                         error: e.to_string(),
+        //                     };
+        //                 }
+        //             }
+        //         }
+        //     }
+        // } else {
+        //     match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
+        //         Ok(r) => r,
+        //         Err(e) => {
+        //             return StepResult::Failed {
+        //                 error: e.to_string(),
+        //             };
+        //         }
+        //     }
+        // };
+
+        let raw_result = match call(&self.llm_provider, &self.llm_model, &prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                return StepResult::Failed {
+                    error: e.to_string(),
+                };
             }
         };
+        tracing::info!("raw_result: {}", &raw_result);
 
         let json_str = extract_json(&raw_result);
         match serde_json::from_str::<serde_json::Value>(json_str) {
@@ -115,6 +124,39 @@ impl Step for BuildAnalysisStep {
             }
         }
     }
+}
+
+async fn call(
+    provider: &Arc<dyn LlmProvider>,
+    model: &str,
+    prompt: &str,
+) -> anyhow::Result<String> {
+    let start = Instant::now();
+    let cc_res = claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await?;
+    tracing::info!("cc耗时{:.2}s", start.elapsed().as_secs());
+
+    let cr = ChatRequest {
+        model: model.to_string(),
+        messages: vec![Message::User {
+            content: prompt.to_string(),
+        }],
+        tools: None,
+        temperature: Some(0.0),
+        tool_choice: None,
+        stop_sequences: None,
+        prefill: None,
+    };
+
+    let start = Instant::now();
+    let llm_res = provider.llm_call(&cr).await?;
+    tracing::info!("llm耗时{:.2}s", start.elapsed().as_secs());
+
+    //上面两个顺序跑， 2个结果随机返回其1
+    Ok(if yunli::util::random_f32() < 0.5 {
+        cc_res
+    } else {
+        llm_res.content
+    })
 }
 
 fn extract_json(text: &str) -> &str {

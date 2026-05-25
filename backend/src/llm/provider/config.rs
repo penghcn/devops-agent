@@ -7,6 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use super::base::BaseConfig;
 use super::{AnthropicProvider, OpenAIProvider};
+use crate::llm::router::build_dummy_provider;
 use crate::llm::{LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 
 /// 单-provider 配置
@@ -81,18 +82,19 @@ impl LlmConfigStore {
         self.inner.read().unwrap().clone()
     }
 
-    /// 根据当前配置重建 ModelRouter
-    pub fn build_router(&self) -> Option<Arc<dyn LlmProvider>> {
+    /// 根据当前配置重建 ModelRouter。无有效配置时返回 dummy provider。
+    pub fn build_router(&self) -> Arc<dyn LlmProvider> {
         let snapshot = self.inner.read().unwrap().clone();
         build_model_router(&snapshot.providers, &snapshot.default_provider)
     }
 }
 
-/// 共享的 ModelRouter 构建逻辑（config.rs 和 agent/mod.rs 共用）
+/// 共享的 ModelRouter 构建逻辑（config.rs 和 agent/mod.rs 共用）。
+/// 无有效配置时返回 dummy provider。
 pub fn build_model_router(
     providers: &[ProviderConfig],
     default_provider: &str,
-) -> Option<Arc<dyn LlmProvider>> {
+) -> Arc<dyn LlmProvider> {
     // 把 default_provider 排到最前面注册，确保优先路由
     let mut sorted = providers.to_vec();
     sorted.sort_by(|a, b| {
@@ -102,7 +104,6 @@ pub fn build_model_router(
     });
 
     let mut router = ModelRouter::new(ModelRouterConfig::default());
-    let mut has_any = false;
 
     for pc in &sorted {
         let Some(ref key) = pc.api_key else { continue };
@@ -171,14 +172,13 @@ pub fn build_model_router(
                 default_model: flash,
             },
         );
-        has_any = true;
     }
 
-    if has_any {
-        Some(Arc::new(router))
+    if router.is_empty() {
+        tracing::warn!("No LLM provider configured, returning dummy provider");
+        build_dummy_provider()
     } else {
-        tracing::error!("No LLM provider configured. Check api_key and base_url in config.");
-        None
+        Arc::new(router)
     }
 }
 

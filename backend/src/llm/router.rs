@@ -71,6 +71,29 @@ impl Default for ModelRouterConfig {
     }
 }
 
+/// A dummy provider that always returns an error.
+/// Used as fallback when no LLM provider is configured.
+pub struct DummyProvider;
+
+#[async_trait::async_trait]
+impl LlmProvider for DummyProvider {
+    async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        Err(LlmError::ApiError {
+            status: 503,
+            body: "No LLM provider configured".to_string(),
+        })
+    }
+
+    fn provider_id(&self) -> &str {
+        "dummy"
+    }
+}
+
+/// Build a dummy provider for fallback when no LLM provider is configured.
+pub fn build_dummy_provider() -> Arc<dyn LlmProvider> {
+    Arc::new(DummyProvider)
+}
+
 /// Routes LLM requests to the appropriate provider and model.
 ///
 /// Consumers call `chat()` without knowing which provider or model handles the request.
@@ -87,6 +110,11 @@ impl ModelRouter {
         Self {
             providers: Vec::new(),
         }
+    }
+
+    /// Returns true if no providers are registered.
+    pub fn is_empty(&self) -> bool {
+        self.providers.is_empty()
     }
 
     /// Register a provider with its model configuration.

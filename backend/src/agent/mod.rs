@@ -101,19 +101,12 @@ pub async fn process_request(
     config: &Config,
     cache: Arc<JenkinsCacheManager>,
 ) -> AgentResponse {
-    let llm_provider: Option<Arc<dyn LlmProvider>> =
+    let llm_provider: Arc<dyn LlmProvider> =
         build_model_router(&config.llm_providers, &config.default_provider);
     let default_model = resolve_default_model(config);
 
-    let intent_router = if let Some(ref provider) = llm_provider {
-        IntentRouter::with_llm(
-            cache.clone(),
-            provider.clone(),
-            default_model.as_deref().unwrap_or("gpt-4o-mini"),
-        )
-    } else {
-        IntentRouter::new(cache)
-    };
+    let intent_router =
+        IntentRouter::with_llm(cache.clone(), llm_provider.clone(), default_model.as_str());
 
     intent_router
         .execute(
@@ -136,15 +129,7 @@ pub async fn process_request_with_store(
     let llm_provider = store.build_router();
     let default_model = resolve_default_model_from_store(store);
 
-    let intent_router = if let Some(ref provider) = llm_provider {
-        IntentRouter::with_llm(
-            cache.clone(),
-            provider.clone(),
-            default_model.as_deref().unwrap_or("gpt-4o-mini"),
-        )
-    } else {
-        IntentRouter::new(cache)
-    };
+    let intent_router = IntentRouter::with_llm(cache.clone(), llm_provider.clone(), &default_model);
 
     intent_router
         .execute(
@@ -158,15 +143,21 @@ pub async fn process_request_with_store(
 }
 
 /// Resolve the default model: look up the default_provider's model_flash.
-fn resolve_default_model(config: &Config) -> Option<String> {
+/// Falls back to "gpt-4o-mini" if not configured.
+fn resolve_default_model(config: &Config) -> String {
     config
         .llm_providers
         .iter()
         .find(|p| p.id == config.default_provider)
         .and_then(|p| p.model_flash.clone())
+        .unwrap_or_else(|| "gpt-4o-mini".to_string())
 }
 
 /// Resolve the default model from LlmConfigStore.
-fn resolve_default_model_from_store(store: &LlmConfigStore) -> Option<String> {
-    store.snapshot().default_model_flash()
+/// Falls back to "gpt-4o-mini" if not configured.
+fn resolve_default_model_from_store(store: &LlmConfigStore) -> String {
+    store
+        .snapshot()
+        .default_model_flash()
+        .unwrap_or_else(|| "gpt-4o-mini".to_string())
 }

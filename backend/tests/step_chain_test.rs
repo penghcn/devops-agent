@@ -147,7 +147,8 @@ fn test_chain_deploy_pipeline() {
         branch: Some("dev".to_string()),
         job_type: Default::default(),
     };
-    let _chain = to_chain_with_prompt(&intent, "部署 ds-pkg", None, None);
+    let provider = devops_agent::llm::router::build_dummy_provider();
+    let _chain = to_chain_with_prompt(&intent, "部署 ds-pkg", provider, "gpt-4o-mini".to_string());
     // StepChain 内部 steps 是私有字段，无法直接测试数量
     // 但可以通过 execute 端到端验证
 }
@@ -164,6 +165,12 @@ fn test_chain_query_pipeline() {
         branch: Some("dev".to_string()),
         job_type: Default::default(),
     };
-    let _chain = to_chain_with_prompt(&intent, "查询 ds-pkg dev 状态", None, None);
+    let provider = devops_agent::llm::router::build_dummy_provider();
+    let _chain = to_chain_with_prompt(
+        &intent,
+        "查询 ds-pkg dev 状态",
+        provider,
+        "gpt-4o-mini".to_string(),
+    );
     // 同上，端到端验证
 }

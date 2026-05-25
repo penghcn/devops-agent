@@ -537,8 +537,8 @@ impl IntentRouter {
         prompt: &str,
         task_type: TaskType,
         config: Arc<Config>,
-        llm_provider: Option<Arc<dyn LlmProvider>>,
-        llm_model: Option<String>,
+        llm_provider: Arc<dyn LlmProvider>,
+        llm_model: String,
     ) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, corrections) = self.identify(prompt).await;
@@ -550,14 +550,9 @@ impl IntentRouter {
 
         let mut ctx = StepContext::new(prompt.to_string(), task_type, job_name, branch, config)
             .with_cache(self.cache.clone())
-            .with_identify_elapsed(identify_elapsed);
-
-        if let Some(provider) = llm_provider {
-            ctx = ctx.with_llm_provider(provider);
-        }
-        if let Some(model) = llm_model {
-            ctx = ctx.with_llm_model(model);
-        }
+            .with_identify_elapsed(identify_elapsed)
+            .with_llm_provider(llm_provider)
+            .with_llm_model(llm_model);
         for c in &corrections {
             ctx = ctx.add_correction(c.kind.clone(), c.original.clone(), c.corrected.clone());
         }
@@ -895,9 +890,21 @@ mod tests {
 
         // 意图等价 → to_chain_with_prompt 生成的步骤链也等价
         // 因为 chain_mapping 只根据 Intent 枚举类型决定步骤链
-        let _chain1 = to_chain_with_prompt(&intent_exact, "", None, None);
-        let _chain2 = to_chain_with_prompt(&intent_branch_fix, "", None, None);
-        let _chain3 = to_chain_with_prompt(&intent_both_fix, "", None, None);
+        let provider = crate::llm::router::build_dummy_provider();
+        let _chain1 = to_chain_with_prompt(
+            &intent_exact,
+            "",
+            provider.clone(),
+            "gpt-4o-mini".to_string(),
+        );
+        let _chain2 = to_chain_with_prompt(
+            &intent_branch_fix,
+            "",
+            provider.clone(),
+            "gpt-4o-mini".to_string(),
+        );
+        let _chain3 =
+            to_chain_with_prompt(&intent_both_fix, "", provider, "gpt-4o-mini".to_string());
     }
 
     #[tokio::test]
@@ -934,9 +941,12 @@ mod tests {
         );
 
         // 步骤链也一致
-        let chain1 = to_chain_with_prompt(&intent1, "", None, None);
-        let chain2 = to_chain_with_prompt(&intent2, "", None, None);
-        let chain3 = to_chain_with_prompt(&intent3, "", None, None);
+        let provider = crate::llm::router::build_dummy_provider();
+        let chain1 =
+            to_chain_with_prompt(&intent1, "", provider.clone(), "gpt-4o-mini".to_string());
+        let chain2 =
+            to_chain_with_prompt(&intent2, "", provider.clone(), "gpt-4o-mini".to_string());
+        let chain3 = to_chain_with_prompt(&intent3, "", provider, "gpt-4o-mini".to_string());
         assert!(
             std::mem::discriminant(&intent1) == std::mem::discriminant(&intent2)
                 && std::mem::discriminant(&intent1) == std::mem::discriminant(&intent3),
