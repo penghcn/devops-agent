@@ -148,8 +148,8 @@ function formatLocalTime(rfc: string): string {
 function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
-  if (m > 0) return `${m}分${s}秒`
-  return `${s}秒`
+  if (m > 0) return `${m}分${s.toFixed(2)}秒`
+  return `${s.toFixed(2)}秒`
 }
 
 // 每秒刷新耗时

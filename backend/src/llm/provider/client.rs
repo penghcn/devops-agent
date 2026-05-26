@@ -61,17 +61,18 @@ pub async fn http_call(
         detail: format!("Failed to read response body: {}", e),
     })?;
 
-    let json: serde_json::Value =
-        serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
-            detail: format!("Invalid JSON from {}: {}", provider_id, e),
-        })?;
-
+    tracing::debug!("LLM Res {}, raw_body: {}", status, &raw_body);
     if status >= 400 {
         return Err(LlmError::ApiError {
             status,
             body: raw_body,
         });
     }
+
+    let json: serde_json::Value =
+        serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
+            detail: format!("Invalid JSON from {}: {}", provider_id, e),
+        })?;
 
     tracing::info!(
         request_id = %request_id,

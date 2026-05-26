@@ -152,6 +152,110 @@ async fn test_run_agent() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// 测试 OpenAIProvider 抽象层（不直接调 HTTP，走完整的 ProviderAdapter 链路）
+async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error>> {
+    use devops_agent::llm::{
+        ChatRequest, Message, OpenAIProvider, ToolCall as McToolCall, ToolDefinition,
+    };
+    use devops_agent::llm::provider::base::BaseConfig;
+
+    let api_key = std::env::var("LELLM_API_KEY").unwrap_or_default();
+    let base_url = std::env::var("LELLM_BASE_URL").unwrap_or_default();
+    let model = "code";
+
+    let provider = OpenAIProvider::new(BaseConfig {
+        api_key,
+        base_url,
+        default_model: model.to_string(),
+        timeout_secs: 60,
+    })?;
+
+    assert_eq!(provider.provider_id(), "openai");
+
+    let tools = vec![ToolDefinition {
+        name: "get_weather".to_string(),
+        description: "获取指定城市的天气".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "city": { "type": "string", "description": "城市名称" }
+            },
+            "required": ["city"]
+        }),
+    }];
+
+    let user_input = "浦东今天什么天气？";
+    let mut messages = vec![
+        Message::System {
+            content: "你是一个有用的助手。如果需要查天气，请调用工具。".to_string(),
+        },
+        Message::User {
+            content: user_input.to_string(),
+        },
+    ];
+
+    for i in 1..=15 {
+        println!("--- Provider 层 第 {} 轮 ---", i);
+
+        let req = ChatRequest {
+            model: model.to_string(),
+            messages: messages.clone(),
+            tools: Some(tools.clone()),
+            temperature: Some(0.0),
+            tool_choice: None,
+            stop_sequences: None,
+            prefill: None,
+        };
+
+        let resp = provider.llm_call(&req).await?;
+
+        if resp.has_tool_calls() {
+            for tc in &resp.tool_calls {
+                let result = execute_tool(tc)?;
+                println!("  工具结果: {}", &result);
+                messages.push(Message::Assistant {
+                    content: "".to_string(),
+                    tool_calls: resp.tool_calls.clone(),
+                });
+                messages.push(Message::ToolResult {
+                    tool_call_id: tc.id.clone(),
+                    content: result,
+                });
+            }
+        } else {
+            println!("Provider 层循环了{}轮, 完成", i);
+            return Ok(format!("最终结果: {}", resp.content));
+        }
+    }
+
+    Ok(format!("达到最大 15 轮"))
+}
+
+/// 执行工具调用（模拟 get_weather）
+fn execute_tool(tc: &McToolCall) -> Result<String, Box<dyn std::error::Error>> {
+    match tc.name.as_str() {
+        "get_weather" => {
+            let city = tc.arguments.get("city").and_then(|v| v.as_str()).unwrap_or("未知");
+            let wea = if yunli::util::random_f32() < 0.3 {
+                (31, "晴朗")
+            } else {
+                (25, "大雨")
+            };
+            Ok(format!("{} 的天气是：{}，气温 {}°C。", city, wea.1, wea.0))
+        }
+        _ => Err(format!("未知工具: {}", tc.name).into()),
+    }
+}
+
+#[ignore]
+#[tokio::test]
+async fn test_openai_provider_agent() -> Result<(), Box<dyn std::error::Error>> {
+    let start = std::time::Instant::now();
+    let res = run_openai_provider_agent().await?;
+    println!("{}\n耗时{:.2?}", res, start.elapsed());
+    Ok(())
+}
+
 const SENSITIVE_KEYS: &[&str] = &["secret", "key", "token", "password", "passwd", "pass", "sk"];
 
 fn is_sensitive_key(k: &str) -> bool {

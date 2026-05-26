@@ -341,6 +341,69 @@ fn test_openai_custom_base_url() {
     assert_eq!(provider.provider_id(), "openai");
 }
 
+/// Test: OpenAIProvider with custom base_url
+/*
+invoke_url='https://integrate.api.nvidia.com/v1/chat/completions'
+
+authorization_header='Authorization: Bearer $NVIDIA_API_KEY'
+accept_header='Accept: application/json'
+content_type_header='Content-Type: application/json'
+
+data=$'{
+  "model": "minimaxai/minimax-m2.7",
+  "messages": [
+    {
+      "role": "user",
+      "content": ""
+    }
+  ],
+  "temperature": 1,
+  "top_p": 0.95,
+  "max_tokens": 8192,
+  "stream": true
+}'
+
+response=$(curl --silent -i -w "\n%{http_code}" --request POST \
+  --url "$invoke_url" \
+  --header "$authorization_header" \
+  --header "$accept_header" \
+  --header "$content_type_header" \
+  --data "$data"
+)
+
+echo "$response"
+*/
+#[tokio::test]
+async fn test_openai_custom_base_url_nvi() {
+    yunli::setup_logger_debug().unwrap();
+    //let model = "meta/llama-3.3-70b-instruct";
+    let model = "stepfun-ai/step-3.5-flash";
+    //let model = "qwen/qwen3-coder-480b-a35b-instruct";
+    //let model = "minimaxai/minimax-m2.7";
+    let config = provider::BaseConfig {
+        api_key: std::env::var("NVIDIA_API_KEY").unwrap(),
+        base_url: "https://integrate.api.nvidia.com".to_string(),
+        default_model: model.to_string(),
+        timeout_secs: 60,
+    };
+    let provider = OpenAIProvider::new(config).unwrap();
+    assert_eq!(provider.provider_id(), "openai");
+
+    let req = ChatRequest {
+        model:model.to_string(),
+        messages: vec![Message::User {
+            content: "Say hello in three words".to_string(),
+        }],
+        tools: None,
+        temperature: None,
+        tool_choice: None,
+        stop_sequences: None,
+        prefill: None,
+    };
+    let res = provider.llm_call(&req).await.unwrap();
+    tracing::info!("{}", res.content);
+}
+
 // ── Anthropic Provider Tests ──
 
 /// Test: AnthropicProvider::new() rejects empty api_key
