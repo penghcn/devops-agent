@@ -10,8 +10,15 @@
 //! 7. 死循环检测 (渐进式干预 3 级)
 //! 8. 信号投票
 
-use devops_agent::llm::Message;
-use devops_agent::llm::ToolCall;
+use devops_agent::llm::{ContentBlock, Message, ToolCall, text_block};
+
+fn extract_text(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|b| b.as_text().map(|s| s.to_string()))
+        .collect::<Vec<_>>()
+        .join("")
+}
 
 // ── Slice 1: Message::ToolResult ──
 
@@ -19,13 +26,14 @@ use devops_agent::llm::ToolCall;
 fn message_tool_result_construction() {
     let msg = Message::ToolResult {
         tool_call_id: "call_abc123".to_string(),
-        content: "天气晴朗，25°C".to_string(),
+        content: text_block("天气晴朗，25°C".into()),
     };
 
     let json = serde_json::to_value(&msg).unwrap();
     assert_eq!(json["type"], "tool_result");
     assert_eq!(json["tool_call_id"], "call_abc123");
-    assert_eq!(json["content"], "天气晴朗，25°C");
+    assert_eq!(json["content"][0]["type"], "text");
+    assert_eq!(json["content"][0]["text"], "天气晴朗，25°C");
 
     let restored: Message = serde_json::from_value(json).unwrap();
     assert!(matches!(restored, Message::ToolResult { .. }));
@@ -35,7 +43,7 @@ fn message_tool_result_construction() {
 fn message_tool_result_match_extraction() {
     let msg = Message::ToolResult {
         tool_call_id: "call_x".to_string(),
-        content: "result data".to_string(),
+        content: text_block("result data".into()),
     };
 
     if let Message::ToolResult {
@@ -44,7 +52,7 @@ fn message_tool_result_match_extraction() {
     } = &msg
     {
         assert_eq!(tool_call_id, "call_x");
-        assert_eq!(content, "result data");
+        assert_eq!(extract_text(content), "result data");
     } else {
         panic!("expected ToolResult variant");
     }
@@ -54,13 +62,13 @@ fn message_tool_result_match_extraction() {
 fn message_all_variants_serialize() {
     let messages = vec![
         Message::System {
-            content: "你是助手".to_string(),
+            content: text_block("你是助手".into()),
         },
         Message::User {
-            content: "查天气".to_string(),
+            content: text_block("查天气".into()),
         },
         Message::Assistant {
-            content: "".to_string(),
+            content: text_block("".into()),
             tool_calls: vec![ToolCall {
                 id: "call_1".to_string(),
                 name: "get_weather".to_string(),
@@ -69,10 +77,10 @@ fn message_all_variants_serialize() {
         },
         Message::ToolResult {
             tool_call_id: "call_1".to_string(),
-            content: "上海天气晴朗".to_string(),
+            content: text_block("上海天气晴朗".into()),
         },
         Message::Assistant {
-            content: "上海天气晴朗".to_string(),
+            content: text_block("上海天气晴朗".into()),
             tool_calls: vec![],
         },
     ];
@@ -91,6 +99,7 @@ fn message_all_variants_serialize() {
 // ── Slice 2: ToolExecutor 注册与分派 ──
 
 mod tool_executor_tests {
+    use super::extract_text;
     use devops_agent::llm::tool_use_loop::{
         ParallelSafety, ToolCallResult, ToolExecutor, ToolRegistration,
     };
@@ -214,7 +223,7 @@ mod tool_executor_tests {
         } = &results[0]
         {
             assert_eq!(tool_call_id, "call_1");
-            assert_eq!(content, "hello");
+            assert_eq!(extract_text(content), "hello");
         } else {
             panic!("expected ToolResult");
         }
@@ -225,7 +234,7 @@ mod tool_executor_tests {
         } = &results[1]
         {
             assert_eq!(tool_call_id, "call_2");
-            assert!(content.contains("工具执行错误"));
+            assert!(extract_text(content).contains("工具执行错误"));
         } else {
             panic!("expected ToolResult");
         }
@@ -235,6 +244,7 @@ mod tool_executor_tests {
 // ── Slice 3: ToolUseLoop 基本流程 ──
 
 mod tool_use_loop_tests {
+    use super::text_block;
     use async_trait::async_trait;
     use devops_agent::llm::tool_use_loop::{
         ToolCallResult, ToolExecutor, ToolRegistration, ToolUseLoop,
@@ -316,7 +326,7 @@ mod tool_use_loop_tests {
             ChatRequest {
                 model: "test".to_string(),
                 messages: vec![Message::User {
-                    content: "北京天气如何？".to_string(),
+                    content: text_block("北京天气如何？".into()),
                 }],
                 tools: None,
                 temperature: None,
@@ -359,7 +369,7 @@ mod tool_use_loop_tests {
             ChatRequest {
                 model: "test".to_string(),
                 messages: vec![Message::User {
-                    content: "你好".to_string(),
+                    content: text_block("你好".into()),
                 }],
                 tools: None,
                 temperature: None,
@@ -427,7 +437,7 @@ mod tool_use_loop_tests {
             ChatRequest {
                 model: "test".to_string(),
                 messages: vec![Message::User {
-                    content: "测试".to_string(),
+                    content: text_block("测试".into()),
                 }],
                 tools: None,
                 temperature: None,
@@ -478,7 +488,7 @@ mod tool_use_loop_tests {
             ChatRequest {
                 model: "test".to_string(),
                 messages: vec![Message::User {
-                    content: "说你好".to_string(),
+                    content: text_block("说你好".into()),
                 }],
                 tools: None,
                 temperature: None,
@@ -799,6 +809,7 @@ mod tool_search_tests {
             name: name.to_string(),
             description: format!("{} 工具", name),
             parameters: serde_json::json!({"type": "object", "properties": {}}),
+            cache_control: None,
         }
     }
 

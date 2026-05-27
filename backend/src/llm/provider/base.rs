@@ -77,7 +77,9 @@ impl<T: ProviderAdapter> LlmProvider for GenericProvider<T> {
         let url = self.adapter.endpoint(&self.config.base_url);
         let api_key = self.config.api_key.clone();
 
-        let resp = http_call(&self.client, &url, &body, self.adapter.id(), |b| {
+        let model = &self.config.default_model;
+
+        let resp = http_call(&self.client, &url, &body, model, &self.adapter.id(), |b| {
             self.adapter.headers(&api_key, b)
         })
         .await?;

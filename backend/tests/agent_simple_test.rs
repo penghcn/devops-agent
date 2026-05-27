@@ -1,3 +1,4 @@
+use devops_agent::llm::{ToolCall, text_block};
 use serde_json::Value;
 use serde_json::json;
 
@@ -154,10 +155,8 @@ async fn test_run_agent() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 测试 OpenAIProvider 抽象层（不直接调 HTTP，走完整的 ProviderAdapter 链路）
 async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error>> {
-    use devops_agent::llm::{
-        ChatRequest, Message, OpenAIProvider, ToolCall as McToolCall, ToolDefinition,
-    };
     use devops_agent::llm::provider::base::BaseConfig;
+    use devops_agent::llm::{ChatRequest, LlmProvider, Message, OpenAIProvider, ToolDefinition};
 
     let api_key = std::env::var("LELLM_API_KEY").unwrap_or_default();
     let base_url = std::env::var("LELLM_BASE_URL").unwrap_or_default();
@@ -182,15 +181,16 @@ async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error
             },
             "required": ["city"]
         }),
+        cache_control: None,
     }];
 
     let user_input = "浦东今天什么天气？";
     let mut messages = vec![
         Message::System {
-            content: "你是一个有用的助手。如果需要查天气，请调用工具。".to_string(),
+            content: text_block("你是一个有用的助手。如果需要查天气，请调用工具。".to_string()),
         },
         Message::User {
-            content: user_input.to_string(),
+            content: text_block(user_input.to_string()),
         },
     ];
 
@@ -214,12 +214,12 @@ async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error
                 let result = execute_tool(tc)?;
                 println!("  工具结果: {}", &result);
                 messages.push(Message::Assistant {
-                    content: "".to_string(),
+                    content: vec![],
                     tool_calls: resp.tool_calls.clone(),
                 });
                 messages.push(Message::ToolResult {
                     tool_call_id: tc.id.clone(),
-                    content: result,
+                    content: text_block(result),
                 });
             }
         } else {
@@ -232,10 +232,14 @@ async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error
 }
 
 /// 执行工具调用（模拟 get_weather）
-fn execute_tool(tc: &McToolCall) -> Result<String, Box<dyn std::error::Error>> {
+fn execute_tool(tc: &ToolCall) -> Result<String, Box<dyn std::error::Error>> {
     match tc.name.as_str() {
         "get_weather" => {
-            let city = tc.arguments.get("city").and_then(|v| v.as_str()).unwrap_or("未知");
+            let city = tc
+                .arguments
+                .get("city")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知");
             let wea = if yunli::util::random_f32() < 0.3 {
                 (31, "晴朗")
             } else {

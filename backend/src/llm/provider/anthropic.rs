@@ -4,7 +4,8 @@ use async_trait::async_trait;
 
 use super::base::{BaseConfig, GenericProvider, ProviderAdapter};
 use crate::llm::{
-    ChatRequest, ChatResponse, LlmError, LlmProvider, Message, TokenUsage, ToolCall, ToolChoice,
+    ChatRequest, ChatResponse, ContentBlock, LlmError, LlmProvider, Message, TokenUsage, ToolCall,
+    ToolChoice,
 };
 
 /// Anthropic Provider — 便捷封装 `GenericProvider<AnthropicAdapter>`
@@ -59,7 +60,37 @@ impl ProviderAdapter for AnthropicAdapter {
         };
 
         let system = request.messages.iter().find_map(|msg| match msg {
-            Message::System { content } => Some(content.clone()),
+            Message::System { content } => {
+                if content.is_empty() {
+                    None
+                } else {
+                    let blocks: Vec<serde_json::Value> = content
+                        .iter()
+                        .map(|b| match b {
+                            ContentBlock::Text {
+                                text,
+                                cache_control,
+                            } => {
+                                let mut block = serde_json::json!({ "type": "text", "text": text });
+                                if cache_control.is_some() {
+                                    block["cache_control"] =
+                                        serde_json::json!({ "type": "ephemeral_buffer" });
+                                }
+                                block
+                            }
+                            ContentBlock::Image { source } => serde_json::json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": source.media_type,
+                                    "data": source.data,
+                                }
+                            }),
+                        })
+                        .collect();
+                    Some(serde_json::json!(blocks))
+                }
+            }
             _ => None,
         });
 
@@ -81,7 +112,7 @@ impl ProviderAdapter for AnthropicAdapter {
             "model": model,
             "max_tokens": 8192,
             "messages": messages,
-            "temperature": request.temperature.unwrap_or(0.0),
+            "temperature": request.temperature.unwrap_or(0.6),
         });
 
         if let Some(sys) = system {
@@ -89,16 +120,19 @@ impl ProviderAdapter for AnthropicAdapter {
         }
 
         if let Some(ref tools) = request.tools {
-            let anthropic_tools: Vec<serde_json::Value> = tools
-                .iter()
-                .map(|t| {
-                    serde_json::json!({
-                        "name": t.name,
-                        "description": t.description,
-                        "input_schema": t.parameters,
-                    })
-                })
-                .collect();
+            let mut anthropic_tools: Vec<serde_json::Value> = Vec::new();
+            for t in tools {
+                anthropic_tools.push(serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters,
+                }));
+                if t.cache_control.is_some() {
+                    anthropic_tools.push(serde_json::json!({
+                        "cache_control": { "type": "ephemeral_buffer" }
+                    }));
+                }
+            }
             body["tools"] = serde_json::json!(anthropic_tools);
         }
 
@@ -191,27 +225,43 @@ impl ProviderAdapter for AnthropicAdapter {
 }
 
 impl AnthropicAdapter {
+    fn join_text(blocks: &[crate::llm::ContentBlock]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| b.as_text().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
     fn message_to_anthropic(&self, msg: &Message) -> Option<serde_json::Value> {
         match msg {
             Message::System { .. } => None,
-            Message::User { content } => Some(serde_json::json!({
-                "role": "user",
-                "content": content,
-            })),
+            Message::User { content } => {
+                let text = Self::join_text(content);
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::json!({
+                        "role": "user",
+                        "content": text,
+                    }))
+                }
+            }
             Message::Assistant {
                 content,
                 tool_calls,
             } => {
-                if content.is_empty() && tool_calls.is_empty() {
+                let text = Self::join_text(content);
+                if text.is_empty() && tool_calls.is_empty() {
                     return None;
                 }
 
                 let mut blocks = Vec::new();
 
-                if !content.is_empty() {
+                if !text.is_empty() {
                     blocks.push(serde_json::json!({
                         "type": "text",
-                        "text": content,
+                        "text": text,
                     }));
                 }
 
@@ -232,14 +282,17 @@ impl AnthropicAdapter {
             Message::ToolResult {
                 tool_call_id,
                 content,
-            } => Some(serde_json::json!({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": content,
-                }]
-            })),
+            } => {
+                let text = Self::join_text(content);
+                Some(serde_json::json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
+                        "content": text,
+                    }]
+                }))
+            }
         }
     }
 }

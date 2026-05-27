@@ -116,7 +116,7 @@ impl ToolExecutor {
             };
             results.push(crate::llm::Message::ToolResult {
                 tool_call_id: call.id.clone(),
-                content,
+                content: crate::llm::text_block(content),
             });
         }
         results

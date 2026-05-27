@@ -61,6 +61,7 @@ impl Tool for GitTool {
                 },
                 "required": ["subcommand"]
             }),
+            cache_control: None,
         }
     }
 

@@ -111,6 +111,7 @@ impl Tool for GetTimeTool {
                 "type": "object",
                 "properties": {}
             }),
+            cache_control: None,
         }
     }
 
@@ -164,6 +165,7 @@ impl Tool for GetEnvTool {
                 },
                 "required": ["name"]
             }),
+            cache_control: None,
         }
     }
 
@@ -244,6 +246,7 @@ impl Tool for GetConfigTool {
                     "path": {"type": "string", "description": "配置路径，如 server.port"}
                 }
             }),
+            cache_control: None,
         }
     }
 

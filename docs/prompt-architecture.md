@@ -157,3 +157,47 @@ tools/
 | 12 | 构建性能 | 预编译缓存 | 层 1~3 启动预编译，<1ms 延迟 |
 | 13 | 动态内容 | 全部工具化 | 时间/环境/配置等改为工具，最大化前缀稳定 |
 | 14 | 代码组织 | 独立模块 | llm/prompt_builder.rs 职责单一，可单独测试 |
+
+---
+
+## 前缀缓存实现决策（2026-05-26 grill-me 确认）
+
+| # | 决策 | 选择 | 原因 |
+|---|------|------|------|
+| D1 | 缓存标记控制 | PromptBuilder 直接操控 `cache_control` | 精确控制每层缓存策略，provider 层做会丢失粒度 |
+| D2 | 缓存断点位置 | 层 3 末尾 + 层 5 末尾各一个 | 两层断点覆盖 90%+ 缓存收益，不超限 |
+| D3 | 缓存断点实现 | 内容块内嵌 `cache_control` | 单条 system 消息内即可控制，无需拆消息 |
+| D4 | 跨 provider 抽象 | `Vec<ContentBlock>` + `CacheControl` 枚举 | 最灵活，未来支持多模态和 caching contours |
+| D5 | Message 重构范围 | 全部变体改为 `Vec<ContentBlock>` | 接口一致性，未来多模态准备，From\<String\> 缓解迁移 |
+| D6 | ContentBlock 类型 | 最小集 Text + Image | 当前够用，未来扩展 forward-compatible |
+| D7 | 静态工具位置 | 仅 `tools` 字段，不重复进 system | `tools` 本身可缓存，避免 LLM 困惑 |
+| D8 | provider 序列化 | 各 provider 各自实现 | Anthropic/OpenAI 格式差异大，无复用空间 |
+| D9 | 静态工具注册 | PromptBuilder 构造时注入 | 项目级配置，build() 签名更简洁 |
+| D10 | tools 缓存断点 | 静态工具后插断点 | 跨会话缓存静态工具，动态工具每次重传 |
+| D11 | 工具分组 | static + workflow + request 三组 | 三层缓存粒度，workflow 同工作流内可缓存 |
+| D12 | 记忆评分 | 类型加权 | Decision(0.9) > UserInput(0.8) > Summary(0.75) > LlmResponse(0.5) > ToolResult(0.4) > ToolCall(0.2) |
+| D13 | LLM 深度压缩 | 专用压缩模型（Haiku） | 避免自引用死锁，成本低，Summarizer 持独立 provider |
+| D14 | ToolUseLoop 集成 | ToolUseLoop 内置 PromptBuilder | 职责清晰，PromptBuilder 可独立测试和复用 |
+| D15 | SessionSlots 更新 | ToolUseLoop 自动更新 | 信息足够，零延迟，无需跨层通信 |
+| D16 | 压缩协作 | ToolUseLoop 内置 Summarizer，暂停压缩 | 避免竞态，本地压缩 <1ms，LLM 压缩 ~2s 可感知 |
+| D17 | 压缩摘要 | structured_output 结构化输出 | 格式一致，可解析，复用已有模块 |
+| D18 | 静态前缀来源 | 混合：system_core 硬编码，其余文件加载 | 核心保证可用，工具/规则可维护 |
+
+### 实现阶段
+
+**Phase 1 — 基础设施**
+1. `ContentBlock` + `CacheControl` 类型定义
+2. `Message` 类型重构（`String` → `Vec<ContentBlock>`）
+3. provider 层序列化适配（Anthropic + OpenAI）
+
+**Phase 2 — Prompt 构建**
+4. `PromptBuilder` 接入内容块 + 缓存断点
+5. 静态工具注册（构造时注入）
+6. 工具分组合并（static + workflow + request）带缓存标记
+7. `StaticPrefix` 内容加载（混合方案）
+
+**Phase 3 — 压缩与记忆**
+8. 记忆类型加权评分
+9. `Summarizer` 接入专用压缩模型
+10. 结构化压缩摘要
+11. ToolUseLoop 集成 PromptBuilder + Summarizer + SessionSlots

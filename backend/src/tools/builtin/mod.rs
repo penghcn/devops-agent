@@ -74,6 +74,7 @@ pub trait Tool {
                 "type": "object",
                 "properties": {}
             }),
+            cache_control: None,
         }
     }
 

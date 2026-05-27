@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use devops_agent::api::AppState;
 use devops_agent::config::Config;
-use devops_agent::llm::{ChatRequest, LlmConfigStore, Message};
+use devops_agent::llm::{ChatRequest, LlmConfigStore};
 use devops_agent::sandbox::{CubeSandboxConfig, SandboxFactory};
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
 
@@ -105,17 +105,7 @@ fn spawn_llm_health_check(llm_config_store: Arc<LlmConfigStore>) {
         loop {
             interval.tick().await;
             let router = llm_config_store.build_router();
-            let req = ChatRequest {
-                model: String::new(),
-                messages: vec![Message::User {
-                    content: "你好".to_string(),
-                }],
-                tools: None,
-                temperature: Some(0.0),
-                tool_choice: None,
-                stop_sequences: None,
-                prefill: None,
-            };
+            let req = ChatRequest::user_prompt("你好".to_string());
             match tokio::time::timeout(std::time::Duration::from_secs(15), router.llm_call(&req))
                 .await
             {

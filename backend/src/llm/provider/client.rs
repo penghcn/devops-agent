@@ -2,6 +2,8 @@
 //!
 //! Handles request dispatch, response reading, JSON parsing and error mapping.
 
+use std::time;
+
 use crate::llm::LlmError;
 
 /// HTTP response body (raw text + parsed JSON).
@@ -24,21 +26,21 @@ pub async fn http_call(
     client: &reqwest::Client,
     url: &str,
     body: &serde_json::Value,
-    provider_id: &str,
+    model: &str,
+    provider: &str,
     configure: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
 ) -> Result<HttpResponse, LlmError> {
     let request_id = format!(
-        "req-{}-{}",
+        "{}-{}-{}",
+        provider,
         chrono::Local::now().timestamp_millis(),
         yunli::util::generate_nonce_ascii_str(8)
     );
 
-    tracing::info!(
-        request_id = %request_id,
-        provider = provider_id,
-        "Sending LLM request"
-    );
+    tracing::info!(model = model, "LLM request {}", request_id);
+    tracing::info!("LLM Req, body: {}", &body);
 
+    let start = time::Instant::now();
     let request_builder = client
         .post(url)
         .json(body)
@@ -61,7 +63,7 @@ pub async fn http_call(
         detail: format!("Failed to read response body: {}", e),
     })?;
 
-    tracing::debug!("LLM Res {}, raw_body: {}", status, &raw_body);
+    tracing::info!("LLM Res {}, body: {}", status, &raw_body);
     if status >= 400 {
         return Err(LlmError::ApiError {
             status,
@@ -71,13 +73,14 @@ pub async fn http_call(
 
     let json: serde_json::Value =
         serde_json::from_str(&raw_body).map_err(|e| LlmError::ParseError {
-            detail: format!("Invalid JSON from {}: {}", provider_id, e),
+            detail: format!("Invalid JSON from {}: {}", model, e),
         })?;
 
     tracing::info!(
-        request_id = %request_id,
-        provider = provider_id,
-        "LLM request completed"
+        model = model,
+        "LLM done. Duration: {:.2}s. {}",
+        start.elapsed().as_secs_f32(),
+        request_id
     );
 
     Ok(HttpResponse {

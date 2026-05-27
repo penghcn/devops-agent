@@ -94,7 +94,7 @@ impl ToolUseLoop {
             }
 
             messages.push(Message::Assistant {
-                content: response.content.clone(),
+                content: crate::llm::text_block(response.content.clone()),
                 tool_calls: response.tool_calls.clone(),
             });
 

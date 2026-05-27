@@ -8,8 +8,16 @@
 
 use devops_agent::llm::router::ProviderModels;
 use devops_agent::llm::structured_output::StructuredOutputMode;
-use devops_agent::llm::*;
+use devops_agent::llm::{ContentBlock, text_block, *};
 use std::sync::Arc;
+
+fn extract_text(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|b| b.as_text().map(|s| s.to_string()))
+        .collect::<Vec<_>>()
+        .join("")
+}
 
 // ── Mock Provider for Router Tests ──
 
@@ -167,7 +175,7 @@ async fn test_route_with_provider() {
     let request = ChatRequest {
         model: String::new(),
         messages: vec![Message::User {
-            content: "部署 ds-pkg".to_string(),
+            content: text_block("部署 ds-pkg".into()),
         }],
         tools: None,
         temperature: None,
@@ -220,7 +228,7 @@ async fn test_route_provider_priority() {
     let request = ChatRequest {
         model: String::new(),
         messages: vec![Message::User {
-            content: "简短回复".to_string(),
+            content: text_block("简短回复".into()),
         }],
         tools: None,
         temperature: None,
@@ -310,7 +318,7 @@ async fn test_explicit_model_routes_by_prefix() {
     let request = ChatRequest {
         model: "claude-sonnet-4".to_string(),
         messages: vec![Message::User {
-            content: "test".to_string(),
+            content: text_block("test".into()),
         }],
         tools: None,
         temperature: None,
@@ -326,7 +334,7 @@ async fn test_explicit_model_routes_by_prefix() {
     let request2 = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "test".to_string(),
+            content: text_block("test".into()),
         }],
         tools: None,
         temperature: None,
@@ -646,8 +654,9 @@ async fn test_tool_use_mode_request_structure() {
     assert_eq!(request.messages.len(), 2);
     match &request.messages[0] {
         Message::System { content } => {
+            let text = extract_text(content);
             assert!(
-                content.contains("结构化数据抽取"),
+                text.contains("结构化数据抽取"),
                 "System prompt should mention data extraction"
             );
         }
@@ -655,7 +664,7 @@ async fn test_tool_use_mode_request_structure() {
     }
     match &request.messages[1] {
         Message::User { content } => {
-            assert_eq!(content, "查询状态");
+            assert_eq!(extract_text(content), "查询状态");
         }
         _ => panic!("Expected User message second"),
     }
@@ -751,16 +760,17 @@ async fn test_enhanced_prompt_mode_request_structure() {
     assert_eq!(request.messages.len(), 2);
     match &request.messages[0] {
         Message::System { content } => {
+            let text = extract_text(content);
             assert!(
-                content.contains("<output_format>"),
+                text.contains("<output_format>"),
                 "System prompt should contain XML output_format tag"
             );
             assert!(
-                content.contains("</output_format>"),
+                text.contains("</output_format>"),
                 "System prompt should close XML tag"
             );
             assert!(
-                content.contains("结构化数据抽取"),
+                text.contains("结构化数据抽取"),
                 "System prompt should mention data extraction"
             );
         }
@@ -768,20 +778,21 @@ async fn test_enhanced_prompt_mode_request_structure() {
     }
     match &request.messages[1] {
         Message::User { content } => {
+            let text = extract_text(content);
             assert!(
-                content.contains("<input>"),
+                text.contains("<input>"),
                 "User prompt should contain XML input tag"
             );
             assert!(
-                content.contains("</input>"),
+                text.contains("</input>"),
                 "User prompt should close XML tag"
             );
             assert!(
-                content.contains("查询状态"),
+                text.contains("查询状态"),
                 "User prompt should contain user input"
             );
             assert!(
-                content.contains("{ 开头"),
+                text.contains("{ 开头"),
                 "User prompt should instruct to start with brace"
             );
         }
@@ -849,7 +860,7 @@ async fn test_enhanced_prompt_mode_with_custom_system() {
 
     match &request.messages[0] {
         Message::System { content } => {
-            assert_eq!(content, "自定义 system prompt");
+            assert_eq!(extract_text(content), "自定义 system prompt");
         }
         _ => panic!("Expected System message"),
     }

@@ -1,12 +1,20 @@
 //! Prompt Builder integration tests
 //!
 //! Verifies seven-layer prompt construction, SessionSlots behavior,
-//! memory filtering, and token estimation.
+//! memory filtering, token estimation, and cache breakpoints.
 
 use devops_agent::llm::prompt_builder::{
     MemorySlot, PromptBuilder, PromptBuilderConfig, SessionSlots, StaticPrefix, estimate_tokens,
 };
-use devops_agent::llm::{Message, ToolDefinition};
+use devops_agent::llm::{ContentBlock, Message, ToolDefinition, text_block};
+
+fn extract_text(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|b| b.as_text().map(|s| s.to_string()))
+        .collect::<Vec<_>>()
+        .join("")
+}
 
 // ── StaticPrefix Tests ──
 
@@ -131,6 +139,7 @@ fn test_build_basic_request() {
         &SessionSlots::new(),
         vec![],
         vec![],
+        vec![],
     );
 
     assert_eq!(req.messages.len(), 2);
@@ -139,16 +148,17 @@ fn test_build_basic_request() {
 
     // System should contain static prefix
     if let Message::System { content } = &req.messages[0] {
-        assert!(content.contains("你是 DevOps Agent"));
-        assert!(content.contains("可用工具"));
-        assert!(content.contains("项目规则"));
+        let text = extract_text(content);
+        assert!(text.contains("你是 DevOps Agent"));
+        assert!(text.contains("可用工具"));
+        assert!(text.contains("项目规则"));
     } else {
         panic!("Expected System message");
     }
 
     // Last message should be user prompt
     if let Message::User { content } = &req.messages[1] {
-        assert_eq!(content, "部署 ds-pkg");
+        assert_eq!(content, &text_block("部署 ds-pkg".into()));
     } else {
         panic!("Expected User message");
     }
@@ -159,10 +169,10 @@ fn test_build_with_conversation_history() {
     let builder = make_builder();
     let conversation = vec![
         Message::User {
-            content: "之前的问题".into(),
+            content: text_block("之前的问题".into()),
         },
         Message::Assistant {
-            content: "之前的回答".into(),
+            content: text_block("之前的回答".into()),
             tool_calls: vec![],
         },
     ];
@@ -172,35 +182,42 @@ fn test_build_with_conversation_history() {
         vec![],
         &SessionSlots::new(),
         vec![],
+        vec![],
         conversation,
     );
 
     // System + 2 history + 1 user = 4 messages
     assert_eq!(req.messages.len(), 4);
-    assert!(matches!(req.messages.last(), Some(Message::User { content }) if content == "新问题"));
+    assert!(
+        matches!(req.messages.last(), Some(Message::User { content }) if content == &text_block("新问题".into()))
+    );
 }
 
 #[test]
 fn test_build_with_dynamic_tools() {
     let builder = make_builder();
-    let tools = vec![ToolDefinition {
+    let workflow_tools = vec![ToolDefinition {
         name: "jenkins_build".into(),
         description: "触发 Jenkins 构建".into(),
         parameters: serde_json::json!({"type": "object"}),
+        cache_control: None,
     }];
 
     let req = builder.build(
         "构建项目".into(),
         vec![],
         &SessionSlots::new(),
-        tools,
+        workflow_tools,
+        vec![],
         vec![],
     );
 
     assert!(req.tools.is_some());
     let t = req.tools.as_ref().unwrap();
-    assert_eq!(t.len(), 1);
-    assert_eq!(t[0].name, "jenkins_build");
+    assert!(t.iter().any(|tool| tool.name == "jenkins_build"));
+    // Workflow tools should have cache_control set
+    let jenkins_tool = t.iter().find(|tool| tool.name == "jenkins_build").unwrap();
+    assert!(jenkins_tool.cache_control.is_some());
 }
 
 #[test]
@@ -210,6 +227,7 @@ fn test_build_without_dynamic_tools() {
         "简单问题".into(),
         vec![],
         &SessionSlots::new(),
+        vec![],
         vec![],
         vec![],
     );
@@ -241,13 +259,15 @@ fn test_build_with_memory_injection() {
         &SessionSlots::new(),
         vec![],
         vec![],
+        vec![],
     );
 
     if let Message::System { content } = &req.messages[0] {
-        assert!(content.contains("用户偏好使用 dev 环境"));
-        assert!(!content.contains("低分记忆不应出现"));
-        assert!(content.contains("另一个高分记忆"));
-        assert!(content.contains("相关记忆"));
+        let text = extract_text(content);
+        assert!(text.contains("用户偏好使用 dev 环境"));
+        assert!(!text.contains("低分记忆不应出现"));
+        assert!(text.contains("另一个高分记忆"));
+        assert!(text.contains("相关记忆"));
     } else {
         panic!("Expected System message");
     }
@@ -260,7 +280,7 @@ fn test_build_memory_max_slots_limit() {
         ..Default::default()
     };
     let prefix = StaticPrefix::new("核心".into(), "工具".into(), "规则".into());
-    let builder = PromptBuilder::new(prefix, config);
+    let builder = PromptBuilder::new(prefix, vec![], config);
 
     // Provide 5 high-score memories, only 2 should be injected
     let memory: Vec<MemorySlot> = (1..=5)
@@ -270,12 +290,20 @@ fn test_build_memory_max_slots_limit() {
         })
         .collect();
 
-    let req = builder.build("测试".into(), memory, &SessionSlots::new(), vec![], vec![]);
+    let req = builder.build(
+        "测试".into(),
+        memory,
+        &SessionSlots::new(),
+        vec![],
+        vec![],
+        vec![],
+    );
 
     if let Message::System { content } = &req.messages[0] {
-        assert!(content.contains("记忆 1"));
-        assert!(content.contains("记忆 2"));
-        assert!(!content.contains("记忆 3"));
+        let text = extract_text(content);
+        assert!(text.contains("记忆 1"));
+        assert!(text.contains("记忆 2"));
+        assert!(!text.contains("记忆 3"));
     } else {
         panic!("Expected System message");
     }
@@ -288,17 +316,25 @@ fn test_build_memory_chars_truncation() {
         ..Default::default()
     };
     let prefix = StaticPrefix::new("核心".into(), "工具".into(), "规则".into());
-    let builder = PromptBuilder::new(prefix, config);
+    let builder = PromptBuilder::new(prefix, vec![], config);
 
     let memory = vec![MemorySlot {
         content: "这是一条非常长的记忆内容应该被截断".into(),
         score: 0.9,
     }];
 
-    let req = builder.build("测试".into(), memory, &SessionSlots::new(), vec![], vec![]);
+    let req = builder.build(
+        "测试".into(),
+        memory,
+        &SessionSlots::new(),
+        vec![],
+        vec![],
+        vec![],
+    );
 
     if let Message::System { content } = &req.messages[0] {
-        assert!(content.contains("…"));
+        let text = extract_text(content);
+        assert!(text.contains("…"));
     } else {
         panic!("Expected System message");
     }
@@ -330,6 +366,127 @@ fn test_build_system_prompt_no_memory() {
     assert!(system.contains("你是 DevOps Agent"));
     assert!(!system.contains("相关记忆"));
     assert!(!system.contains("会话上下文"));
+}
+
+// ── Cache Breakpoint Tests ──
+
+#[test]
+fn test_build_cache_breakpoints() {
+    let builder = make_builder();
+    let mut session = SessionSlots::new();
+    session.goal = Some("测试".into());
+
+    let req = builder.build("测试提示".into(), vec![], &session, vec![], vec![], vec![]);
+
+    if let Message::System { content } = &req.messages[0] {
+        // First block should have cache_control (static prefix)
+        assert!(matches!(
+            content.first(),
+            Some(ContentBlock::Text {
+                cache_control: Some(_),
+                ..
+            })
+        ));
+        // Last block should have cache_control (session context)
+        assert!(matches!(
+            content.last(),
+            Some(ContentBlock::Text {
+                cache_control: Some(_),
+                ..
+            })
+        ));
+    } else {
+        panic!("Expected System message");
+    }
+}
+
+#[test]
+fn test_build_cache_breakpoints_with_memory() {
+    let builder = make_builder();
+    let memory = vec![MemorySlot {
+        content: "测试记忆".into(),
+        score: 0.9,
+    }];
+
+    let req = builder.build(
+        "测试".into(),
+        memory,
+        &SessionSlots::new(),
+        vec![],
+        vec![],
+        vec![],
+    );
+
+    if let Message::System { content } = &req.messages[0] {
+        // Should have 2 blocks: static prefix (cached) + memory (not cached)
+        assert_eq!(content.len(), 2);
+        assert!(matches!(
+            content.first(),
+            Some(ContentBlock::Text {
+                cache_control: Some(_),
+                ..
+            })
+        ));
+        assert!(matches!(
+            content.get(1),
+            Some(ContentBlock::Text {
+                cache_control: None,
+                ..
+            })
+        ));
+    } else {
+        panic!("Expected System message");
+    }
+}
+
+#[test]
+fn test_build_tool_merge_with_cache() {
+    let static_tools = vec![ToolDefinition {
+        name: "read".into(),
+        description: "读取文件".into(),
+        parameters: serde_json::json!({"type": "object"}),
+        cache_control: None,
+    }];
+    let prefix = StaticPrefix::new("核心".into(), "工具".into(), "规则".into());
+    let builder = PromptBuilder::new(prefix, static_tools, Default::default());
+
+    let workflow_tools = vec![ToolDefinition {
+        name: "jenkins_build".into(),
+        description: "触发构建".into(),
+        parameters: serde_json::json!({"type": "object"}),
+        cache_control: None,
+    }];
+    let request_tools = vec![ToolDefinition {
+        name: "temp_tool".into(),
+        description: "临时工具".into(),
+        parameters: serde_json::json!({"type": "object"}),
+        cache_control: None,
+    }];
+
+    let req = builder.build(
+        "测试".into(),
+        vec![],
+        &SessionSlots::new(),
+        workflow_tools,
+        request_tools,
+        vec![],
+    );
+
+    let tools = req.tools.as_ref().unwrap();
+    // Should contain all three tools + cache breakpoints
+    let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"read"));
+    assert!(names.contains(&"jenkins_build"));
+    assert!(names.contains(&"temp_tool"));
+
+    // Static and workflow tools should have cache_control
+    let read_tool = tools.iter().find(|t| t.name == "read").unwrap();
+    assert!(read_tool.cache_control.is_some());
+    let jenkins_tool = tools.iter().find(|t| t.name == "jenkins_build").unwrap();
+    assert!(jenkins_tool.cache_control.is_some());
+    // Request tools should NOT have cache_control
+    let temp_tool = tools.iter().find(|t| t.name == "temp_tool").unwrap();
+    assert!(temp_tool.cache_control.is_none());
 }
 
 // ── Token Estimation Tests ──

@@ -62,11 +62,11 @@ fn summarizer_strategy_per_message() {
     assert_eq!(format!("{:?}", strategy), "PerMessage");
 }
 
-#[test]
-fn summarizer_summarize_with_llm_not_connected() {
+#[tokio::test]
+async fn summarizer_summarize_with_llm_not_connected() {
     let summarizer = Summarizer::default();
     let messages = vec!["test".to_string()];
 
-    let result = summarizer.summarize_with_llm(&messages);
+    let result = summarizer.summarize_with_llm(&messages).await;
     assert!(result.is_err());
 }

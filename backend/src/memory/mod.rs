@@ -20,6 +20,21 @@ pub enum MemoryType {
     Summary,
 }
 
+impl MemoryType {
+    /// 类型权重评分（用于 PromptBuilder 记忆过滤）
+    /// Decision(0.9) > UserInput(0.8) > Summary(0.75) > LlmResponse(0.5) > ToolResult(0.4) > ToolCall(0.2)
+    pub fn default_score(&self) -> f32 {
+        match self {
+            MemoryType::Decision => 0.9,
+            MemoryType::UserInput => 0.8,
+            MemoryType::Summary => 0.75,
+            MemoryType::LlmResponse => 0.5,
+            MemoryType::ToolResult => 0.4,
+            MemoryType::ToolCall => 0.2,
+        }
+    }
+}
+
 /// 记忆条目
 #[derive(Debug, Clone)]
 pub struct MemoryEntry {

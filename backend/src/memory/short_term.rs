@@ -27,9 +27,9 @@ impl ShortTermMemory {
         let entry = MemoryEntry {
             id: self.next_id,
             content,
-            r#type,
+            r#type: r#type.clone(),
             timestamp: chrono::Utc::now(),
-            score: 1.0,
+            score: r#type.default_score(),
         };
 
         self.next_id += 1;

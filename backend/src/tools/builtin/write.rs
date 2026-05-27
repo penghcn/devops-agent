@@ -63,6 +63,7 @@ impl Tool for WriteTool {
                 },
                 "required": ["path", "content"]
             }),
+            cache_control: None,
         }
     }
 

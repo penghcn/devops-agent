@@ -54,6 +54,7 @@ impl Tool for BashTool {
                 },
                 "required": ["command"]
             }),
+            cache_control: None,
         }
     }
 

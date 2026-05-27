@@ -1,6 +1,6 @@
 use super::super::claude;
 use super::super::step::{Step, StepContext, StepResult};
-use crate::llm::{ChatRequest, LlmProvider, Message};
+use crate::llm::{ChatRequest, LlmProvider};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -135,17 +135,7 @@ async fn call(
     let cc_res = claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await?;
     tracing::info!("cc耗时{:.2}s", start.elapsed().as_secs());
 
-    let cr = ChatRequest {
-        model: model.to_string(),
-        messages: vec![Message::User {
-            content: prompt.to_string(),
-        }],
-        tools: None,
-        temperature: Some(0.0),
-        tool_choice: None,
-        stop_sequences: None,
-        prefill: None,
-    };
+    let cr = ChatRequest::user_prompt(prompt.to_string()).with_model(model.to_string());
 
     let start = Instant::now();
     let llm_res = provider.llm_call(&cr).await?;

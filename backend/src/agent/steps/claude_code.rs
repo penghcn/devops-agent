@@ -51,10 +51,10 @@ impl Step for ClaudeCodeStep {
                 .llm_call(&ChatRequest {
                     model,
                     messages: vec![Message::User {
-                        content: self.prompt.clone(),
+                        content: crate::llm::text_block(self.prompt.clone()),
                     }],
                     tools: None,
-                    temperature: Some(0.0),
+                    temperature: Some(0.6),
                     tool_choice: None,
                     stop_sequences: None,
                     prefill: None,

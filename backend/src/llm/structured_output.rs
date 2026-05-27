@@ -30,7 +30,9 @@
 
 use std::sync::Arc;
 
-use super::{ChatRequest, LlmError, LlmProvider, Message, ToolChoice, ToolDefinition};
+use super::{
+    ChatRequest, LlmError, LlmProvider, Message, ToolChoice, ToolDefinition, text_block as tb,
+};
 
 /// 结构化输出模式
 #[derive(Debug, Clone, Copy, Default)]
@@ -230,9 +232,12 @@ impl StructuredOutput {
             name: self.tool_name.clone(),
             description: self.tool_description.clone(),
             parameters: self.schema.clone(),
+            cache_control: None,
         };
 
-        let mut messages = vec![Message::System { content: system }];
+        let mut messages = vec![Message::System {
+            content: tb(system),
+        }];
 
         if attempt > 0 {
             // Retry: show previous failure
@@ -242,21 +247,21 @@ impl StructuredOutput {
                 Err(e) => &format!("上一次输出不是有效的 JSON: {}", e),
             };
             messages.push(Message::User {
-                content: user_prompt.to_string(),
+                content: tb(user_prompt.to_string()),
             });
             messages.push(Message::Assistant {
-                content: last.clone(),
+                content: tb(last.clone()),
                 tool_calls: Vec::new(),
             });
             messages.push(Message::User {
-                content: format!(
+                content: tb(format!(
                     "你的上一次输出不符合 JSON Schema。错误: {}。\n请重新调用工具输出正确的 JSON。",
                     error_hint
-                ),
+                )),
             });
         } else {
             messages.push(Message::User {
-                content: user_prompt.to_string(),
+                content: tb(user_prompt.to_string()),
             });
         }
 
@@ -264,7 +269,7 @@ impl StructuredOutput {
             model: self.model.clone(),
             messages,
             tools: Some(vec![tool]),
-            temperature: Some(0.0),
+            temperature: Some(0.5),
             tool_choice: Some(ToolChoice::Tool {
                 name: self.tool_name.clone(),
             }),
@@ -290,7 +295,9 @@ impl StructuredOutput {
                 )
             });
 
-        let mut messages = vec![Message::System { content: system }];
+        let mut messages = vec![Message::System {
+            content: tb(system),
+        }];
 
         if attempt > 0 {
             let last = failed_responses.last().unwrap();
@@ -299,24 +306,24 @@ impl StructuredOutput {
                 Err(e) => &format!("上一次输出不是有效的 JSON: {}", e),
             };
             messages.push(Message::User {
-                content: user_prompt.to_string(),
+                content: tb(user_prompt.to_string()),
             });
             messages.push(Message::Assistant {
-                content: last.clone(),
+                content: tb(last.clone()),
                 tool_calls: Vec::new(),
             });
             messages.push(Message::User {
-                content: format!(
+                content: tb(format!(
                     "你的上一次输出不符合 JSON Schema。错误: {}。\n请直接输出 JSON，以 {{ 开头。",
                     error_hint
-                ),
+                )),
             });
         } else {
             messages.push(Message::User {
-                content: format!(
+                content: tb(format!(
                     "<input>\n{}\n</input>\n\n直接输出 JSON，以 {{ 开头。",
                     user_prompt
-                ),
+                )),
             });
         }
 
@@ -324,7 +331,7 @@ impl StructuredOutput {
             model: self.model.clone(),
             messages,
             tools: None,
-            temperature: Some(0.0),
+            temperature: Some(0.5),
             tool_choice: None,
             stop_sequences: Some(vec!["\n\n\n".to_string(), "```\n".to_string()]),
             prefill: Some("{}".to_string()),

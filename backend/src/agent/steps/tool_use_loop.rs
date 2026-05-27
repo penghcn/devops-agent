@@ -72,12 +72,12 @@ impl ToolUseLoopStep {
 
         if let Some(ref system) = self.system_message {
             messages.push(Message::System {
-                content: system.clone(),
+                content: crate::llm::text_block(system.clone()),
             });
         }
 
         messages.push(Message::User {
-            content: self.prompt.clone(),
+            content: crate::llm::text_block(self.prompt.clone()),
         });
 
         messages
@@ -110,7 +110,7 @@ impl Step for ToolUseLoopStep {
             model: self.llm_model.clone(),
             messages,
             tools: Some(tools),
-            temperature: Some(0.0),
+            temperature: Some(0.6),
             tool_choice: None,
             stop_sequences: None,
             prefill: None,

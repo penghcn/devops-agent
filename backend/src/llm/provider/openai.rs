@@ -73,7 +73,7 @@ impl ProviderAdapter for OpenAIAdapter {
         let mut body = serde_json::json!({
             "model": model,
             "messages": messages,
-            "temperature": request.temperature.unwrap_or(0.0),
+            "temperature": request.temperature.unwrap_or(0.6),
         });
 
         if let Some(ref tools) = request.tools {
@@ -183,28 +183,51 @@ impl ProviderAdapter for OpenAIAdapter {
 }
 
 impl OpenAIAdapter {
+    fn join_text(blocks: &[crate::llm::ContentBlock]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| b.as_text().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
     fn message_to_openai(&self, msg: &Message) -> Option<serde_json::Value> {
         match msg {
-            Message::System { content } => Some(serde_json::json!({
-                "role": "system",
-                "content": content,
-            })),
-            Message::User { content } => Some(serde_json::json!({
-                "role": "user",
-                "content": content,
-            })),
+            Message::System { content } => {
+                let text = Self::join_text(content);
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::json!({
+                        "role": "system",
+                        "content": text,
+                    }))
+                }
+            }
+            Message::User { content } => {
+                let text = Self::join_text(content);
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::json!({
+                        "role": "user",
+                        "content": text,
+                    }))
+                }
+            }
             Message::Assistant {
                 content,
                 tool_calls,
             } => {
-                if content.is_empty() && tool_calls.is_empty() {
+                let text = Self::join_text(content);
+                if text.is_empty() && tool_calls.is_empty() {
                     return None;
                 }
 
                 let mut msg_obj = serde_json::json!({ "role": "assistant" });
 
-                if !content.is_empty() {
-                    msg_obj["content"] = serde_json::json!(content);
+                if !text.is_empty() {
+                    msg_obj["content"] = serde_json::json!(text);
                 }
 
                 if !tool_calls.is_empty() {
@@ -229,11 +252,14 @@ impl OpenAIAdapter {
             Message::ToolResult {
                 tool_call_id,
                 content,
-            } => Some(serde_json::json!({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": content,
-            })),
+            } => {
+                let text = Self::join_text(content);
+                Some(serde_json::json!({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": text,
+                }))
+            }
         }
     }
 }

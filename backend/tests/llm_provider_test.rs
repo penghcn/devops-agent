@@ -5,7 +5,7 @@
 //! - ChatRequest, ChatResponse, TokenUsage, Message, ToolCall, LlmError types
 //! - Provider implementations compile correctly
 
-use devops_agent::llm::*;
+use devops_agent::llm::{text_block, *};
 
 // ── Type Structure Tests ──
 
@@ -13,23 +13,29 @@ use devops_agent::llm::*;
 #[test]
 fn test_message_enum_variants() {
     let sys = Message::System {
-        content: "You are helpful".to_string(),
+        content: text_block("You are helpful".to_string()),
     };
     let user = Message::User {
-        content: "Hello".to_string(),
+        content: text_block("Hello".to_string()),
     };
     let assistant = Message::Assistant {
-        content: "Hi there".to_string(),
+        content: text_block("Hi there".to_string()),
         tool_calls: vec![],
     };
 
     match sys {
-        Message::System { content } => assert_eq!(content, "You are helpful"),
+        Message::System { content } => {
+            assert_eq!(content.len(), 1);
+            assert_eq!(content[0].as_text(), Some("You are helpful"));
+        }
         _ => panic!("Wrong variant"),
     }
 
     match user {
-        Message::User { content } => assert_eq!(content, "Hello"),
+        Message::User { content } => {
+            assert_eq!(content.len(), 1);
+            assert_eq!(content[0].as_text(), Some("Hello"));
+        }
         _ => panic!("Wrong variant"),
     }
 
@@ -38,7 +44,8 @@ fn test_message_enum_variants() {
             content,
             tool_calls,
         } => {
-            assert_eq!(content, "Hi there");
+            assert_eq!(content.len(), 1);
+            assert_eq!(content[0].as_text(), Some("Hi there"));
             assert!(tool_calls.is_empty());
         }
         _ => panic!("Wrong variant"),
@@ -51,7 +58,7 @@ fn test_chat_request_fields() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "test".to_string(),
+            content: text_block("test".to_string()),
         }],
         tools: None,
         temperature: Some(0.7),
@@ -76,6 +83,7 @@ fn test_chat_request_with_tools() {
             "type": "object",
             "properties": { "path": { "type": "string" } }
         }),
+        cache_control: None,
     }];
 
     let req = ChatRequest {
@@ -217,6 +225,7 @@ fn test_tool_definition_fields() {
             "type": "object",
             "properties": { "command": { "type": "string" } }
         }),
+        cache_control: None,
     };
 
     assert_eq!(td.name, "bash");
@@ -260,7 +269,7 @@ async fn test_mock_provider_chat() {
     let req = ChatRequest {
         model: "test".to_string(),
         messages: vec![Message::User {
-            content: "hello".to_string(),
+            content: text_block("hello".to_string()),
         }],
         tools: None,
         temperature: None,
@@ -390,9 +399,9 @@ async fn test_openai_custom_base_url_nvi() {
     assert_eq!(provider.provider_id(), "openai");
 
     let req = ChatRequest {
-        model:model.to_string(),
+        model: model.to_string(),
         messages: vec![Message::User {
-            content: "Say hello in three words".to_string(),
+            content: text_block("Say hello in three words".to_string()),
         }],
         tools: None,
         temperature: None,
@@ -448,10 +457,10 @@ fn test_openai_build_request() {
         model: "gpt-4o".to_string(),
         messages: vec![
             Message::System {
-                content: "You are helpful".to_string(),
+                content: text_block("You are helpful".to_string()),
             },
             Message::User {
-                content: "Hello".to_string(),
+                content: text_block("Hello".to_string()),
             },
         ],
         tools: None,
@@ -482,12 +491,13 @@ fn test_openai_build_request_with_tools() {
             "type": "object",
             "properties": { "path": { "type": "string" } }
         }),
+        cache_control: None,
     }];
 
     let req = ChatRequest {
         model: String::new(),
         messages: vec![Message::User {
-            content: "read /tmp/test.txt".to_string(),
+            content: text_block("read /tmp/test.txt".to_string()),
         }],
         tools: Some(tools),
         temperature: None,
@@ -570,10 +580,10 @@ fn test_anthropic_build_request() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "Be concise".to_string(),
+                content: text_block("Be concise".to_string()),
             },
             Message::User {
-                content: "What is Rust?".to_string(),
+                content: text_block("What is Rust?".to_string()),
             },
         ],
         tools: None,
@@ -587,7 +597,10 @@ fn test_anthropic_build_request() {
 
     assert_eq!(body["model"], "claude-sonnet-4");
     assert_eq!(body["max_tokens"], 8192);
-    assert_eq!(body["system"], "Be concise");
+    // System is now an array of content blocks
+    assert!(body["system"].is_array());
+    assert_eq!(body["system"][0]["type"], "text");
+    assert_eq!(body["system"][0]["text"], "Be concise");
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs.len(), 1); // system is extracted separately
     assert_eq!(msgs[0]["role"], "user");
@@ -604,6 +617,7 @@ fn test_anthropic_build_request_with_tools() {
             "type": "object",
             "properties": { "command": { "type": "string" } }
         }),
+        cache_control: None,
     }];
 
     let req = ChatRequest {
@@ -680,12 +694,13 @@ fn test_openai_tool_choice_specific_tool() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "测试".to_string(),
+            content: text_block("测试".to_string()),
         }],
         tools: Some(vec![ToolDefinition {
             name: "extract".to_string(),
             description: "提取数据".to_string(),
             parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
         }]),
         temperature: None,
         tool_choice: Some(ToolChoice::Tool {
@@ -707,12 +722,13 @@ fn test_openai_tool_choice_any() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "测试".to_string(),
+            content: text_block("测试".to_string()),
         }],
         tools: Some(vec![ToolDefinition {
             name: "read".to_string(),
             description: "读取文件".to_string(),
             parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
         }]),
         temperature: None,
         tool_choice: Some(ToolChoice::Any),
@@ -732,16 +748,17 @@ fn test_anthropic_tool_choice_specific_tool() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: Some(vec![ToolDefinition {
             name: "extract".to_string(),
             description: "提取数据".to_string(),
             parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
         }]),
         temperature: None,
         tool_choice: Some(ToolChoice::Tool {
@@ -764,16 +781,17 @@ fn test_anthropic_tool_choice_any() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: Some(vec![ToolDefinition {
             name: "read".to_string(),
             description: "读取文件".to_string(),
             parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
         }]),
         temperature: None,
         tool_choice: Some(ToolChoice::Any),
@@ -792,12 +810,13 @@ fn test_openai_no_tool_choice() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "测试".to_string(),
+            content: text_block("测试".to_string()),
         }],
         tools: Some(vec![ToolDefinition {
             name: "read".to_string(),
             description: "读取文件".to_string(),
             parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
         }]),
         temperature: None,
         tool_choice: None,
@@ -818,16 +837,17 @@ fn test_anthropic_no_tool_choice() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: Some(vec![ToolDefinition {
             name: "read".to_string(),
             description: "读取文件".to_string(),
             parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
         }]),
         temperature: None,
         tool_choice: None,
@@ -848,7 +868,7 @@ fn test_openai_prefill_appends_assistant_message() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "查询状态".to_string(),
+            content: text_block("查询状态".to_string()),
         }],
         tools: None,
         temperature: None,
@@ -873,10 +893,10 @@ fn test_anthropic_prefill_appends_assistant_message() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "查询状态".to_string(),
+                content: text_block("查询状态".to_string()),
             },
         ],
         tools: None,
@@ -902,7 +922,7 @@ fn test_openai_no_prefill() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "测试".to_string(),
+            content: text_block("测试".to_string()),
         }],
         tools: None,
         temperature: None,
@@ -925,10 +945,10 @@ fn test_anthropic_no_prefill() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: None,
@@ -953,7 +973,7 @@ fn test_openai_stop_sequences() {
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "测试".to_string(),
+            content: text_block("测试".to_string()),
         }],
         tools: None,
         temperature: None,
@@ -975,10 +995,10 @@ fn test_anthropic_stop_sequences() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: None,
@@ -1003,10 +1023,10 @@ fn test_openai_assistant_with_tool_calls() {
         model: "gpt-4o".to_string(),
         messages: vec![
             Message::User {
-                content: "部署 ds-pkg".to_string(),
+                content: text_block("部署 ds-pkg".to_string()),
             },
             Message::Assistant {
-                content: "我来帮你部署".to_string(),
+                content: text_block("我来帮你部署".to_string()),
                 tool_calls: vec![ToolCall {
                     id: "call_1".to_string(),
                     name: "deploy".to_string(),
@@ -1043,10 +1063,10 @@ fn test_openai_assistant_tool_calls_only() {
         model: "gpt-4o".to_string(),
         messages: vec![
             Message::User {
-                content: "部署".to_string(),
+                content: text_block("部署".to_string()),
             },
             Message::Assistant {
-                content: String::new(),
+                content: vec![],
                 tool_calls: vec![ToolCall {
                     id: "call_1".to_string(),
                     name: "deploy".to_string(),
@@ -1077,13 +1097,13 @@ fn test_anthropic_assistant_with_tool_calls() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "部署 ds-pkg".to_string(),
+                content: text_block("部署 ds-pkg".to_string()),
             },
             Message::Assistant {
-                content: "我来帮你部署".to_string(),
+                content: text_block("我来帮你部署".to_string()),
                 tool_calls: vec![ToolCall {
                     id: "toolu_1".to_string(),
                     name: "deploy".to_string(),
@@ -1122,13 +1142,13 @@ fn test_anthropic_assistant_tool_calls_only() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "部署".to_string(),
+                content: text_block("部署".to_string()),
             },
             Message::Assistant {
-                content: String::new(),
+                content: vec![],
                 tool_calls: vec![ToolCall {
                     id: "toolu_1".to_string(),
                     name: "deploy".to_string(),
@@ -1160,10 +1180,10 @@ fn test_anthropic_system_extracted_to_top_level() {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是 DevOps 助手".to_string(),
+                content: text_block("你是 DevOps 助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: None,
@@ -1175,8 +1195,10 @@ fn test_anthropic_system_extracted_to_top_level() {
 
     let body = adapter.build_request(&req, "claude-sonnet-4");
 
-    // System should be at top-level, not in messages
-    assert_eq!(body["system"], "你是 DevOps 助手");
+    // System should be at top-level as content blocks array
+    assert!(body["system"].is_array());
+    assert_eq!(body["system"][0]["type"], "text");
+    assert_eq!(body["system"][0]["text"], "你是 DevOps 助手");
     let messages = body["messages"].as_array().unwrap();
     // Only user message in messages array
     assert_eq!(messages.len(), 1);
@@ -1195,12 +1217,13 @@ fn test_openai_tool_definition_format() {
             "type": "object",
             "properties": {"path": {"type": "string"}}
         }),
+        cache_control: None,
     }];
 
     let req = ChatRequest {
         model: "gpt-4o".to_string(),
         messages: vec![Message::User {
-            content: "测试".to_string(),
+            content: text_block("测试".to_string()),
         }],
         tools: Some(tools),
         temperature: None,
@@ -1228,16 +1251,17 @@ fn test_anthropic_tool_definition_format() {
             "type": "object",
             "properties": {"path": {"type": "string"}}
         }),
+        cache_control: None,
     }];
 
     let req = ChatRequest {
         model: "claude-sonnet-4".to_string(),
         messages: vec![
             Message::System {
-                content: "你是助手".to_string(),
+                content: text_block("你是助手".to_string()),
             },
             Message::User {
-                content: "测试".to_string(),
+                content: text_block("测试".to_string()),
             },
         ],
         tools: Some(tools),

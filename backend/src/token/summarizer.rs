@@ -1,4 +1,7 @@
 use anyhow;
+use std::sync::Arc;
+
+use crate::llm::{ChatRequest, LlmProvider, Message, ToolChoice, ToolDefinition, text_block};
 
 /// 压缩阶段
 #[derive(Debug, Clone, PartialEq)]
@@ -62,15 +65,33 @@ impl Default for SummarizerConfig {
 }
 
 /// 渐进式三阶段摘要压缩器（混合触发）
-#[derive(Debug, Clone, Default)]
 pub struct Summarizer {
     pub config: SummarizerConfig,
+    /// 专用压缩模型 provider（如 Haiku），用于 LLM 深度压缩
+    compression_provider: Option<Arc<dyn LlmProvider>>,
+}
+
+impl Default for Summarizer {
+    fn default() -> Self {
+        Self {
+            config: SummarizerConfig::default(),
+            compression_provider: None,
+        }
+    }
 }
 
 impl Summarizer {
     /// 创建摘要压缩器
     pub fn new(config: SummarizerConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            compression_provider: None,
+        }
+    }
+
+    /// 设置专用压缩模型 provider
+    pub fn set_compression_provider(&mut self, provider: Arc<dyn LlmProvider>) {
+        self.compression_provider = Some(provider);
     }
 
     /// 根据轮次判断当前压缩阶段
@@ -155,21 +176,166 @@ impl Summarizer {
         }
     }
 
-    /// LLM 摘要压缩（深度压缩，尚未连接 LLM 层）
-    pub fn summarize_with_llm(&self, _messages: &[String]) -> anyhow::Result<SummaryResult> {
-        anyhow::bail!("LLM summarizer not yet connected");
+    /// LLM 摘要压缩（深度压缩，使用专用压缩模型）
+    pub async fn summarize_with_llm(&self, messages: &[String]) -> anyhow::Result<SummaryResult> {
+        let Some(provider) = &self.compression_provider else {
+            anyhow::bail!("LLM summarizer not yet connected");
+        };
+
+        let concatenated = messages.join("\n---\n");
+        let prompt = format!(
+            "请将以下对话历史压缩为结构化摘要。只输出 JSON，不要包含其他文字。\n\n{}",
+            concatenated
+        );
+
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["summary", "key_decisions", "action_items"],
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "对话的简洁摘要，包含主要讨论内容和结论"
+                },
+                "key_decisions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "关键决策列表（如部署目标、配置变更等）"
+                },
+                "action_items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "待办事项列表（如需要执行的构建、需要验证的结果等）"
+                }
+            }
+        });
+
+        let tool = ToolDefinition {
+            name: "compression_summary".to_string(),
+            description: "输出压缩后的结构化摘要".to_string(),
+            parameters: schema,
+            cache_control: None,
+        };
+
+        let request = ChatRequest {
+            model: String::new(),
+            messages: vec![
+                Message::System {
+                    content: text_block(
+                        "你是一个专业的对话摘要助手。你的任务是将对话压缩为简洁的结构化摘要。"
+                            .to_string(),
+                    ),
+                },
+                Message::User {
+                    content: text_block(prompt),
+                },
+            ],
+            tools: Some(vec![tool]),
+            temperature: Some(0.5),
+            tool_choice: Some(ToolChoice::Tool {
+                name: "compression_summary".to_string(),
+            }),
+            stop_sequences: None,
+            prefill: None,
+        };
+
+        let response = provider.llm_call(&request).await?;
+
+        // 从 tool_calls 中提取结果
+        if response.tool_calls.is_empty() {
+            // 回退：直接从 content 解析
+            let parsed: serde_json::Value = serde_json::from_str(&response.content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse LLM summary response: {}", e))?;
+
+            let summary = parsed
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let key_decisions: Vec<String> = parsed
+                .get("key_decisions")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let action_items: Vec<String> = parsed
+                .get("action_items")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let original_tokens: u32 = messages.iter().map(|m| Self::estimate_tokens(m)).sum();
+            let compressed_tokens = Self::estimate_tokens(&summary);
+
+            return Ok(SummaryResult {
+                summary,
+                key_decisions,
+                action_items,
+                original_tokens,
+                compressed_tokens,
+            });
+        }
+
+        let tc = &response.tool_calls[0];
+        let args = &tc.arguments;
+
+        let summary = args
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let key_decisions: Vec<String> = args
+            .get("key_decisions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let action_items: Vec<String> = args
+            .get("action_items")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let original_tokens: u32 = messages.iter().map(|m| Self::estimate_tokens(m)).sum();
+        let compressed_tokens = Self::estimate_tokens(&summary);
+
+        Ok(SummaryResult {
+            summary,
+            key_decisions,
+            action_items,
+            original_tokens,
+            compressed_tokens,
+        })
     }
 
-    /// 根据触发方式执行压缩
-    pub fn compress(
+    /// 根据触发方式执行压缩（异步版本）
+    pub async fn compress(
         &self,
         messages: &[String],
         trigger: CompressionTrigger,
     ) -> anyhow::Result<SummaryResult> {
         match trigger {
             CompressionTrigger::RoundThreshold => Ok(self.summarize_local(messages)),
-            CompressionTrigger::TokenBudget => self.summarize_with_llm(messages),
+            CompressionTrigger::TokenBudget => self.summarize_with_llm(messages).await,
         }
+    }
+
+    /// 同步版本的压缩（仅本地压缩，不触发 LLM）
+    pub fn compress_local(&self, messages: &[String]) -> SummaryResult {
+        self.summarize_local(messages)
     }
 
     /// 根据消息数量选择压缩策略

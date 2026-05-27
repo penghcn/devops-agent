@@ -7,11 +7,11 @@
 //! 4. 动态记忆（部分缓存）
 //! 5. Session 上下文（低缓存）
 //! 6. 动态工具（低缓存）
-//! 7. 对话 Messages（0% 缓存）
+//! 7. 动态 Messages（0% 缓存）
 
 use std::sync::Arc;
 
-use super::{ChatRequest, Message, ToolDefinition};
+use super::{CacheControl, ChatRequest, ContentBlock, Message, ToolDefinition};
 
 /// 层 1~3 预编译的静态前缀
 #[derive(Debug, Clone)]
@@ -143,15 +143,22 @@ impl Default for PromptBuilderConfig {
 pub struct PromptBuilder {
     /// 预编译的静态前缀（层 1~3）
     static_prefix: Arc<StaticPrefix>,
+    /// 静态工具集（层 2，构造时注入）
+    static_tools: Vec<ToolDefinition>,
     /// 配置
     config: PromptBuilderConfig,
 }
 
 impl PromptBuilder {
     /// 创建构建器
-    pub fn new(static_prefix: StaticPrefix, config: PromptBuilderConfig) -> Self {
+    pub fn new(
+        static_prefix: StaticPrefix,
+        static_tools: Vec<ToolDefinition>,
+        config: PromptBuilderConfig,
+    ) -> Self {
         Self {
             static_prefix: Arc::new(static_prefix),
+            static_tools,
             config,
         }
     }
@@ -164,57 +171,35 @@ impl PromptBuilder {
     ) -> Self {
         Self::new(
             StaticPrefix::new(system_core, tool_guidelines, project_rules),
+            vec![],
             PromptBuilderConfig::default(),
         )
     }
 
+    // ── 核心构建方法 ──
+
     /// 构建完整的 ChatRequest
+    ///
+    /// - `workflow_tools`: 同工作流内稳定的工具（如 Jenkins 场景工具）
+    /// - `request_tools`: 本次请求特有的工具
     pub fn build(
         &self,
         user_prompt: String,
         memory_slots: Vec<MemorySlot>,
         session: &SessionSlots,
-        dynamic_tools: Vec<ToolDefinition>,
+        workflow_tools: Vec<ToolDefinition>,
+        request_tools: Vec<ToolDefinition>,
         conversation: Vec<Message>,
     ) -> ChatRequest {
-        // 层 1~3: 静态前缀（预编译）
-        let mut system_parts = vec![self.static_prefix.as_str().to_string()];
+        // 层 1~5: 构建 System ContentBlock（带缓存断点）
+        let system_blocks = self.build_system_blocks(memory_slots, session);
 
-        // 层 4: 动态记忆（高分过滤 + 截断）
-        let injected_memory: Vec<String> = memory_slots
-            .into_iter()
-            .filter(|m| m.score >= self.config.memory_score_threshold)
-            .take(self.config.max_memory_slots)
-            .map(|m| m.content.truncate_to(self.config.max_memory_chars))
-            .collect();
-        if !injected_memory.is_empty() {
-            let mem_text = injected_memory
-                .iter()
-                .enumerate()
-                .map(|(i, m)| format!("  {}. {}", i + 1, m))
-                .collect::<Vec<_>>()
-                .join("\n");
-            system_parts.push(format!("相关记忆:\n{}", mem_text));
-        }
-
-        // 层 5: Session 上下文
-        let session_ctx = session.to_context();
-        if !session_ctx.is_empty() {
-            system_parts.push(format!("会话上下文:\n{}", session_ctx));
-        }
-
-        let system_content = system_parts.join("\n\n");
-
-        // 层 6: 动态工具（场景工具追加）
-        let tools = if dynamic_tools.is_empty() {
-            None
-        } else {
-            Some(dynamic_tools)
-        };
+        // 层 6: 工具备并（static + workflow + request），组间插入缓存标记
+        let merged_tools = self.merge_tools(workflow_tools, request_tools);
 
         // 层 7: 对话 Messages
         let mut messages = vec![Message::System {
-            content: system_content,
+            content: system_blocks,
         }];
 
         // 追加历史对话
@@ -222,13 +207,17 @@ impl PromptBuilder {
 
         // 追加当前用户输入
         messages.push(Message::User {
-            content: user_prompt,
+            content: text_block(user_prompt),
         });
 
         ChatRequest {
             model: String::new(),
             messages,
-            tools,
+            tools: if merged_tools.is_empty() {
+                None
+            } else {
+                Some(merged_tools)
+            },
             temperature: None,
             tool_choice: None,
             stop_sequences: None,
@@ -236,14 +225,25 @@ impl PromptBuilder {
         }
     }
 
-    /// 仅构建 System prompt（用于调试）
-    pub fn build_system_prompt(
+    /// 构建 System 消息的 ContentBlock 列表（带缓存断点）
+    ///
+    /// 缓存断点位置：
+    /// - 层 3 末尾（静态前缀之后）— 第一个断点
+    /// - 层 5 末尾（Session 上下文之后）— 第二个断点
+    fn build_system_blocks(
         &self,
         memory_slots: Vec<MemorySlot>,
         session: &SessionSlots,
-    ) -> String {
-        let mut parts = vec![self.static_prefix.as_str().to_string()];
+    ) -> Vec<ContentBlock> {
+        let mut blocks = Vec::new();
 
+        // 层 1~3: 静态前缀（带缓存断点）
+        blocks.push(ContentBlock::text_with_cache(
+            self.static_prefix.as_str().to_string(),
+            CacheControl::EphemeralBuffer,
+        ));
+
+        // 层 4: 动态记忆
         let injected_memory: Vec<String> = memory_slots
             .into_iter()
             .filter(|m| m.score >= self.config.memory_score_threshold)
@@ -257,21 +257,105 @@ impl PromptBuilder {
                 .map(|(i, m)| format!("  {}. {}", i + 1, m))
                 .collect::<Vec<_>>()
                 .join("\n");
-            parts.push(format!("相关记忆:\n{}", mem_text));
+            blocks.push(ContentBlock::text(format!("相关记忆:\n{}", mem_text)));
         }
 
+        // 层 5: Session 上下文（带缓存断点）
         let session_ctx = session.to_context();
         if !session_ctx.is_empty() {
-            parts.push(format!("会话上下文:\n{}", session_ctx));
+            blocks.push(ContentBlock::text_with_cache(
+                format!("会话上下文:\n{}", session_ctx),
+                CacheControl::EphemeralBuffer,
+            ));
         }
 
-        parts.join("\n\n")
+        blocks
+    }
+
+    /// 工具备并：static → workflow → request，组间插入缓存标记
+    fn merge_tools(
+        &self,
+        workflow_tools: Vec<ToolDefinition>,
+        request_tools: Vec<ToolDefinition>,
+    ) -> Vec<ToolDefinition> {
+        let total = self.static_tools.len() + workflow_tools.len() + request_tools.len();
+        if total == 0 {
+            return vec![];
+        }
+
+        let mut tools = Vec::with_capacity(total + 2);
+
+        // Static tools（带缓存标记）
+        if !self.static_tools.is_empty() {
+            tools.extend(
+                self.static_tools
+                    .iter()
+                    .map(|t| t.clone_with_cache(CacheControl::EphemeralBuffer)),
+            );
+        }
+
+        // Workflow tools（带缓存标记）
+        if !workflow_tools.is_empty() {
+            tools.push(ToolDefinition::cache_breakpoint());
+            tools.extend(workflow_tools.into_iter().map(|mut t| {
+                t.cache_control = Some(CacheControl::EphemeralBuffer);
+                t
+            }));
+        }
+
+        // Request tools（无缓存标记）
+        if !request_tools.is_empty() {
+            tools.push(ToolDefinition::cache_breakpoint());
+            tools.extend(request_tools);
+        }
+
+        tools
+    }
+
+    /// 仅构建 System prompt 字符串（用于调试）
+    pub fn build_system_prompt(
+        &self,
+        memory_slots: Vec<MemorySlot>,
+        session: &SessionSlots,
+    ) -> String {
+        self.build_system_blocks(memory_slots, session)
+            .iter()
+            .filter_map(|b| b.as_text().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     /// 估算 System prompt 的 Token 数
     pub fn estimate_system_tokens(&self, system_prompt: &str) -> u32 {
         estimate_tokens(system_prompt)
     }
+}
+
+impl ToolDefinition {
+    /// 克隆并设置缓存标记
+    pub fn clone_with_cache(&self, cache: CacheControl) -> Self {
+        Self {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            parameters: self.parameters.clone(),
+            cache_control: Some(cache),
+        }
+    }
+
+    /// 创建纯缓存断点工具（仅用于工具列表中的缓存标记）
+    pub fn cache_breakpoint() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            cache_control: Some(CacheControl::EphemeralBuffer),
+        }
+    }
+}
+
+/// 便捷地将 String 转为单元素 ContentBlock 数组
+pub fn text_block(s: String) -> Vec<ContentBlock> {
+    vec![ContentBlock::text(s)]
 }
 
 /// 混合 Token 估算（与 ContextWindow 一致）
@@ -305,6 +389,8 @@ impl TruncateExt for String {
         }
     }
 }
+
+// ── 用于 TokenUsage 估算（不暴露完整类型）─────────
 
 #[cfg(test)]
 mod tests {
@@ -366,11 +452,70 @@ mod tests {
             &SessionSlots::new(),
             vec![],
             vec![],
+            vec![],
         );
 
         assert!(!req.messages.is_empty());
         assert!(matches!(req.messages.first(), Some(Message::System { .. })));
         assert!(matches!(req.messages.last(), Some(Message::User { .. })));
+    }
+
+    #[test]
+    fn test_build_with_tools() {
+        let builder = make_builder();
+        let workflow_tools = vec![ToolDefinition {
+            name: "jenkins_build".into(),
+            description: "触发构建".into(),
+            parameters: serde_json::json!({"type": "object"}),
+            cache_control: None,
+        }];
+
+        let req = builder.build(
+            "构建".into(),
+            vec![],
+            &SessionSlots::new(),
+            workflow_tools,
+            vec![],
+            vec![],
+        );
+
+        assert!(req.tools.is_some());
+        let tools = req.tools.as_ref().unwrap();
+        // Should have at least the workflow tool
+        assert!(tools.iter().any(|t| t.name == "jenkins_build"));
+        // Workflow tools should have cache_control set
+        let jenkins_tool = tools.iter().find(|t| t.name == "jenkins_build").unwrap();
+        assert!(jenkins_tool.cache_control.is_some());
+    }
+
+    #[test]
+    fn test_build_cache_breakpoints() {
+        let builder = make_builder();
+        let mut session = SessionSlots::new();
+        session.goal = Some("测试".into());
+
+        let req = builder.build("测试提示".into(), vec![], &session, vec![], vec![], vec![]);
+
+        if let Message::System { content } = &req.messages[0] {
+            // First block should have cache_control (static prefix)
+            assert!(matches!(
+                content.first(),
+                Some(ContentBlock::Text {
+                    cache_control: Some(_),
+                    ..
+                })
+            ));
+            // Last block should have cache_control (session context)
+            assert!(matches!(
+                content.last(),
+                Some(ContentBlock::Text {
+                    cache_control: Some(_),
+                    ..
+                })
+            ));
+        } else {
+            panic!("Expected System message");
+        }
     }
 
     #[test]
@@ -384,6 +529,6 @@ mod tests {
     #[test]
     fn test_estimate_tokens() {
         assert!((estimate_tokens("你好") as i32 - 3).abs() <= 1);
-        assert!(estimate_tokens("Hi") > 0); // TODO 当前 >= 0 恒成立，后续优化
+        // ASCII "Hi" = 2 chars / 4 = 0 tokens (floor division, expected)
     }
 }

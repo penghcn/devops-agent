@@ -64,6 +64,7 @@ impl Tool for ReadTool {
                 },
                 "required": ["path"]
             }),
+            cache_control: None,
         }
     }
 

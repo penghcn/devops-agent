@@ -169,7 +169,7 @@ impl ModelRouter {
         messages
             .iter()
             .filter_map(|m| match m {
-                Message::User { content } => Some(content.as_str()),
+                Message::User { .. } => Some(m.extract_text()),
                 _ => None,
             })
             .collect::<Vec<_>>()
