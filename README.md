@@ -91,6 +91,7 @@ backend/src/
 │       ├── config.rs          # ProviderConfig + LlmConfigStore + build_model_router()
 │       ├── client.rs          # 共享 HTTP 调用逻辑
 │       ├── openai.rs          # OpenAIAdapter + OpenAIProvider 封装
+│       ├── openai_compat.rs   # macro 生成 NVIDIA/DeepSeek/LLaMA/VLLM 适配（OpenAI 兼容协议）
 │       └── anthropic.rs       # AnthropicAdapter + AnthropicProvider 封装
 │
 ├── agent/                     # 意图识别 + 步骤编排
@@ -123,7 +124,8 @@ backend/src/
               ├── Provider Config → build_model_router() → ModelRouter
               │     ├── BaseConfig + ProviderAdapter trait + GenericProvider<T>
               │     ├── OpenAIProvider (GenericProvider<OpenAIAdapter>)
-              │     └── AnthropicProvider (GenericProvider<AnthropicAdapter>)
+              │     ├── AnthropicProvider (GenericProvider<AnthropicAdapter>)
+              │     └── OpenAI 兼容宏生成：NVIDIA/DeepSeek/LLaMA/VLLM Provider
               │
               ├── IntentRouter → 意图识别
               │     ├── 正则匹配（精确指令）

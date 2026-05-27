@@ -6,9 +6,12 @@
 use std::sync::{Arc, RwLock};
 
 use super::base::BaseConfig;
-use super::{AnthropicProvider, OpenAIProvider};
+use super::{
+    AnthropicProvider, DeepSeekProvider, LLaMAProvider, NVIDIAProvider, OpenAIProvider,
+    VLLMProvider,
+};
 use crate::llm::router::build_dummy_provider;
-use crate::llm::{LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
+use crate::llm::{LlmError, LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 
 /// 单-provider 配置
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -131,36 +134,29 @@ pub fn build_model_router(
             timeout_secs: 60,
         };
 
-        let provider: Arc<dyn LlmProvider> = if pc.id == "openai" {
-            match OpenAIProvider::new(base_config) {
-                Ok(p) => Arc::new(p),
-                Err(e) => {
-                    tracing::warn!(
-                        provider = %pc.id,
-                        error = %e,
-                        "Failed to create OpenAI provider"
-                    );
-                    continue;
-                }
+        let result: Result<Arc<dyn LlmProvider>, LlmError> = match pc.id.as_str() {
+            "openai" => OpenAIProvider::new(base_config).map(|p| Arc::new(p) as _),
+            "anthropic" => AnthropicProvider::new(base_config).map(|p| Arc::new(p) as _),
+            "nvidia" => NVIDIAProvider::new(base_config).map(|p| Arc::new(p) as _),
+            "deepseek" => DeepSeekProvider::new(base_config).map(|p| Arc::new(p) as _),
+            "llama" => LLaMAProvider::new(base_config).map(|p| Arc::new(p) as _),
+            "vllm" => VLLMProvider::new(base_config).map(|p| Arc::new(p) as _),
+            _ => {
+                tracing::warn!(provider = %pc.id, "Unknown provider, skipping");
+                continue;
             }
-        } else if pc.id == "anthropic" {
-            match AnthropicProvider::new(base_config) {
-                Ok(p) => Arc::new(p),
-                Err(e) => {
-                    tracing::warn!(
-                        provider = %pc.id,
-                        error = %e,
-                        "Failed to create Anthropic provider"
-                    );
-                    continue;
-                }
+        };
+
+        let provider = match result {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    provider = %pc.id,
+                    error = %e,
+                    "Failed to create provider"
+                );
+                continue;
             }
-        } else {
-            tracing::warn!(
-                provider = %pc.id,
-                "Unknown provider, skipping"
-            );
-            continue;
         };
 
         router.register_provider(
