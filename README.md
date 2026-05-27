@@ -72,8 +72,8 @@ backend/src/
 │   ├── mod.rs                 # LlmProvider trait + Message/ChatRequest 等类型
 │   ├── router.rs              # ModelRouter：L1/L2 任务分类 + provider 路由
 │   ├── structured_output.rs   # Schema 强约束输出
-│   ├── prompt_builder.rs      # 七层 Prompt 构建器（前缀缓存最大化）
-│   │   ├── StaticPrefix       # 层 1~3 预编译缓存（静态 System + 工具指南 + 项目规则）
+│   ├── prompt_builder.rs      # 七层 Prompt 构建器（静态前缀全局单例 + build_simple 简易模式）
+│   │   ├── StaticPrefix       # 层 1~3 全局单例（OnceLock<Arc>，所有请求共享）
 │   │   ├── SessionSlots       # 层 5 结构化槽位（目标 + 步骤 + 错误）
 │   │   └── MemorySlot         # 层 4 高分记忆过滤注入
 │   ├── tool_use_loop/         # LLM ↔ 工具调用闭环（拆分后 8 子模块）
@@ -108,7 +108,7 @@ backend/src/
 │       ├── jenkins_wait.rs    # 等待构建完成
 │       ├── jenkins_status.rs  # 查询构建状态
 │       ├── jenkins_log.rs     # 拉取构建日志
-│       ├── build_analysis.rs  # AI 分析构建结果
+│       ├── build_analysis.rs  # AI 分析构建结果（走 PromptBuilder::build_simple 注入静态前缀）
 │       ├── claude_code.rs     # Claude 代码生成（降级方案）
 │       └── tool_use_loop.rs   # ToolUseLoopStep：LLM 原生工具调用循环（前端展示为 Agent）
 │

@@ -1,6 +1,6 @@
 use super::super::claude;
 use super::super::step::{Step, StepContext, StepResult};
-use crate::llm::{ChatRequest, LlmProvider};
+use crate::llm::{LlmProvider, PromptBuilder};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -135,13 +135,16 @@ async fn call(
     let cc_res = claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await?;
     tracing::info!("cc耗时{:.2}s", start.elapsed().as_secs());
 
-    let cr = ChatRequest::user_prompt(prompt.to_string()).with_model(model.to_string());
+    let builder = PromptBuilder::with_static_tools(vec![]);
+    let cr = builder
+        .build_simple(prompt.to_string())
+        .with_model(model.to_string());
 
     let start = Instant::now();
     let llm_res = provider.llm_call(&cr).await?;
     tracing::info!("llm耗时{:.2}s", start.elapsed().as_secs());
 
-    //上面两个顺序跑， 2个结果随机返回其1
+    // 对比实验：Claude Code CLI vs LLM Provider，随机返回其一
     Ok(if yunli::util::random_f32() < 0.5 {
         cc_res
     } else {

@@ -9,7 +9,7 @@
 //! 6. 动态工具（低缓存）
 //! 7. 动态 Messages（0% 缓存）
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::{CacheControl, ChatRequest, ContentBlock, Message, ToolDefinition};
 
@@ -58,6 +58,19 @@ impl StaticPrefix {
     pub fn as_str(&self) -> &str {
         &self.compiled
     }
+}
+
+/// 默认静态前缀的全局单例（内容永不变化，所有请求共享）
+static DEFAULT_STATIC_PREFIX: OnceLock<Arc<StaticPrefix>> = OnceLock::new();
+
+fn default_static_prefix() -> &'static Arc<StaticPrefix> {
+    DEFAULT_STATIC_PREFIX.get_or_init(|| {
+        Arc::new(StaticPrefix::new(
+            SYSTEM_CORE.to_string(),
+            TOOL_GUIDELINES.to_string(),
+            DEFAULT_PROJECT_RULES.to_string(),
+        ))
+    })
 }
 
 /// Session 上下文结构化槽位
@@ -203,16 +216,13 @@ impl PromptBuilder {
     }
 
     /// 使用默认静态内容创建构建器（生产环境使用）
+    /// 静态前缀复用全局单例，所有请求共享同一 Arc 实例
     pub fn with_static_tools(static_tools: Vec<ToolDefinition>) -> Self {
-        Self::new(
-            StaticPrefix::new(
-                SYSTEM_CORE.to_string(),
-                TOOL_GUIDELINES.to_string(),
-                DEFAULT_PROJECT_RULES.to_string(),
-            ),
+        Self {
+            static_prefix: default_static_prefix().clone(),
             static_tools,
-            PromptBuilderConfig::default(),
-        )
+            config: PromptBuilderConfig::default(),
+        }
     }
 
     /// 使用自定义项目规则创建构建器
@@ -270,6 +280,32 @@ impl PromptBuilder {
             } else {
                 Some(merged_tools)
             },
+            temperature: None,
+            tool_choice: None,
+            stop_sequences: None,
+            prefill: None,
+        }
+    }
+
+    /// 构建简易 ChatRequest（仅静态前缀 System + 用户消息，无工具/记忆/Session）
+    /// 适用于单轮分析任务（如 BuildAnalysis），不注入动态层
+    pub fn build_simple(&self, user_prompt: String) -> ChatRequest {
+        let system_blocks = vec![ContentBlock::text_with_cache(
+            self.static_prefix.as_str().to_string(),
+            CacheControl::EphemeralBuffer,
+        )];
+
+        ChatRequest {
+            model: String::new(),
+            messages: vec![
+                Message::System {
+                    content: system_blocks,
+                },
+                Message::User {
+                    content: text_block(user_prompt),
+                },
+            ],
+            tools: None,
             temperature: None,
             tool_choice: None,
             stop_sequences: None,
@@ -585,5 +621,40 @@ mod tests {
     fn test_estimate_tokens() {
         assert!((estimate_tokens("你好") as i32 - 3).abs() <= 1);
         // ASCII "Hi" = 2 chars / 4 = 0 tokens (floor division, expected)
+    }
+
+    #[test]
+    fn test_build_simple() {
+        let builder = make_builder();
+        let req = builder.build_simple("分析构建日志".into());
+
+        // Should have exactly 2 messages: System + User
+        assert_eq!(req.messages.len(), 2);
+        assert!(matches!(req.messages[0], Message::System { .. }));
+        assert!(matches!(req.messages[1], Message::User { .. }));
+        // No tools
+        assert!(req.tools.is_none());
+        // System block should have cache control
+        if let Message::System { content } = &req.messages[0] {
+            assert!(matches!(
+                content.first(),
+                Some(ContentBlock::Text {
+                    cache_control: Some(_),
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn test_default_static_prefix_sharing() {
+        // 两次调用 with_static_tools 应共享同一 Arc 实例
+        let builder1 = PromptBuilder::with_static_tools(vec![]);
+        let builder2 = PromptBuilder::with_static_tools(vec![]);
+        // Arc::ptr_eq 检查两个 Arc 是否指向同一分配
+        assert!(Arc::ptr_eq(
+            &builder1.static_prefix,
+            &builder2.static_prefix
+        ));
     }
 }
