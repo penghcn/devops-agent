@@ -79,6 +79,7 @@ impl ProviderAdapter for OpenAIAdapter {
         if let Some(ref tools) = request.tools {
             let openai_tools: Vec<serde_json::Value> = tools
                 .iter()
+                .filter(|t| !t.name.is_empty())
                 .map(|t| {
                     serde_json::json!({
                         "type": "function",

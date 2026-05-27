@@ -122,6 +122,10 @@ impl ProviderAdapter for AnthropicAdapter {
         if let Some(ref tools) = request.tools {
             let mut anthropic_tools: Vec<serde_json::Value> = Vec::new();
             for t in tools {
+                // 跳过缓存断点伪工具（空 name）
+                if t.name.is_empty() {
+                    continue;
+                }
                 anthropic_tools.push(serde_json::json!({
                     "name": t.name,
                     "description": t.description,

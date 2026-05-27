@@ -13,6 +13,30 @@ use std::sync::Arc;
 
 use super::{CacheControl, ChatRequest, ContentBlock, Message, ToolDefinition};
 
+/// 层 1: 静态 System 核心
+const SYSTEM_CORE: &str = r#"你是 DevOps Agent，专注于 CI/CD 流水线管理、构建分析和部署运维。
+行为准则：
+1. 使用中文回复，保持专业简洁
+2. 分析构建日志时给出结构化结果
+3. 优先使用工具获取信息，不猜测
+安全红线：
+1. 不执行破坏性命令（rm -rf、格式化磁盘等）
+2. 不泄露敏感信息（API Key、Token、密码）
+3. 不访问未授权的资源"#;
+
+/// 层 2: 静态工具指南
+const TOOL_GUIDELINES: &str = r#"可用辅助工具：
+- get_time: 获取当前时间（ISO 8601 + Unix 时间戳）
+- get_env: 读取白名单内的环境变量
+- get_config: 读取项目配置项
+使用建议：先获取上下文信息再执行操作，避免盲目操作。"#;
+
+/// 层 3: 默认项目规则
+const DEFAULT_PROJECT_RULES: &str = r#"项目规则：
+1. 构建失败时分析根因并给出修复建议
+2. 部署前确认目标环境和分支
+3. 所有操作需要记录审计日志"#;
+
 /// 层 1~3 预编译的静态前缀
 #[derive(Debug, Clone)]
 pub struct StaticPrefix {
@@ -50,6 +74,9 @@ pub struct SessionSlots {
 }
 
 impl SessionSlots {
+    const MAX_STEPS: usize = 5;
+    const MAX_ERRORS: usize = 3;
+
     pub fn new() -> Self {
         Self {
             max_slot_chars: 500,
@@ -59,8 +86,7 @@ impl SessionSlots {
 
     /// 添加步骤结果，超出限制时移除最旧
     pub fn add_step(&mut self, step: String) {
-        let max = self.recent_steps.len();
-        if self.recent_steps.len() >= max.max(5) {
+        if self.recent_steps.len() >= Self::MAX_STEPS {
             self.recent_steps.remove(0);
         }
         self.recent_steps
@@ -69,7 +95,7 @@ impl SessionSlots {
 
     /// 添加活跃错误
     pub fn add_error(&mut self, error: String) {
-        if self.active_errors.len() >= 3 {
+        if self.active_errors.len() >= Self::MAX_ERRORS {
             self.active_errors.remove(0);
         }
         self.active_errors
@@ -176,6 +202,32 @@ impl PromptBuilder {
         )
     }
 
+    /// 使用默认静态内容创建构建器（生产环境使用）
+    pub fn with_static_tools(static_tools: Vec<ToolDefinition>) -> Self {
+        Self::new(
+            StaticPrefix::new(
+                SYSTEM_CORE.to_string(),
+                TOOL_GUIDELINES.to_string(),
+                DEFAULT_PROJECT_RULES.to_string(),
+            ),
+            static_tools,
+            PromptBuilderConfig::default(),
+        )
+    }
+
+    /// 使用自定义项目规则创建构建器
+    pub fn with_project_rules(project_rules: String, static_tools: Vec<ToolDefinition>) -> Self {
+        Self::new(
+            StaticPrefix::new(
+                SYSTEM_CORE.to_string(),
+                TOOL_GUIDELINES.to_string(),
+                project_rules,
+            ),
+            static_tools,
+            PromptBuilderConfig::default(),
+        )
+    }
+
     // ── 核心构建方法 ──
 
     /// 构建完整的 ChatRequest
@@ -243,7 +295,7 @@ impl PromptBuilder {
             CacheControl::EphemeralBuffer,
         ));
 
-        // 层 4: 动态记忆
+        // 层 4: 动态记忆（带缓存标记，记忆在单次请求间稳定）
         let injected_memory: Vec<String> = memory_slots
             .into_iter()
             .filter(|m| m.score >= self.config.memory_score_threshold)
@@ -257,7 +309,10 @@ impl PromptBuilder {
                 .map(|(i, m)| format!("  {}. {}", i + 1, m))
                 .collect::<Vec<_>>()
                 .join("\n");
-            blocks.push(ContentBlock::text(format!("相关记忆:\n{}", mem_text)));
+            blocks.push(ContentBlock::text_with_cache(
+                format!("相关记忆:\n{}", mem_text),
+                CacheControl::EphemeralBuffer,
+            ));
         }
 
         // 层 5: Session 上下文（带缓存断点）

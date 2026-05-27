@@ -70,36 +70,27 @@ impl ToolUseLoop {
 
     /// 执行 tool-use 循环。
     pub async fn execute(self) -> Result<ToolUseResult, LlmError> {
-        let mut messages = self.request.messages.clone();
+        // 复用同一个 ChatRequest，避免每轮克隆 messages/tools
+        let mut req = self.request;
 
         for iteration in 1..=self.max_iterations {
-            let req = ChatRequest {
-                model: self.request.model.clone(),
-                messages: messages.clone(),
-                tools: self.request.tools.clone(),
-                temperature: self.request.temperature,
-                tool_choice: self.request.tool_choice.clone(),
-                stop_sequences: self.request.stop_sequences.clone(),
-                prefill: self.request.prefill.clone(),
-            };
-
             let response = self.provider.llm_call(&req).await?;
 
             if !response.has_tool_calls() {
                 return Ok(ToolUseResult {
                     response,
-                    messages,
+                    messages: req.messages,
                     iterations: iteration,
                 });
             }
 
-            messages.push(Message::Assistant {
+            req.messages.push(Message::Assistant {
                 content: crate::llm::text_block(response.content.clone()),
                 tool_calls: response.tool_calls.clone(),
             });
 
             let tool_results = self.executor.execute_batch(&response.tool_calls).await;
-            messages.extend(tool_results);
+            req.messages.extend(tool_results);
 
             tracing::debug!(
                 iteration,

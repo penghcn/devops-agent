@@ -430,7 +430,7 @@ fn test_build_cache_breakpoints_with_memory() {
         assert!(matches!(
             content.get(1),
             Some(ContentBlock::Text {
-                cache_control: None,
+                cache_control: Some(_),
                 ..
             })
         ));

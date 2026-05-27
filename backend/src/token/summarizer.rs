@@ -122,20 +122,9 @@ impl Summarizer {
         None
     }
 
-    /// 估算文本 Token 数（与 ContextWindow 一致的混合估算）
+    /// 估算文本 Token 数（委托到 llm::estimate_tokens）
     fn estimate_tokens(s: &str) -> u32 {
-        let mut cjk: f32 = 0.0;
-        let mut ascii: f32 = 0.0;
-        for ch in s.chars() {
-            if ch.is_ascii() {
-                ascii += 1.0;
-            } else if ch.is_alphabetic() || ch.is_numeric() {
-                cjk += 1.5;
-            } else {
-                cjk += 1.0;
-            }
-        }
-        ((ascii / 4.0) + cjk) as u32
+        crate::llm::estimate_tokens(s)
     }
 
     /// 本地摘要压缩（提取关键句子 + 截断）
@@ -240,57 +229,29 @@ impl Summarizer {
 
         let response = provider.llm_call(&request).await?;
 
-        // 从 tool_calls 中提取结果
-        if response.tool_calls.is_empty() {
-            // 回退：直接从 content 解析
-            let parsed: serde_json::Value = serde_json::from_str(&response.content)
-                .map_err(|e| anyhow::anyhow!("Failed to parse LLM summary response: {}", e))?;
+        // 从 tool_calls 或 content 中提取 JSON 数据
+        let data: serde_json::Value = if let Some(tc) = response.tool_calls.first() {
+            tc.arguments.clone()
+        } else {
+            serde_json::from_str(&response.content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse LLM summary response: {}", e))?
+        };
 
-            let summary = parsed
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let key_decisions: Vec<String> = parsed
-                .get("key_decisions")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let action_items: Vec<String> = parsed
-                .get("action_items")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
+        Ok(self._parse_summary_from_json(&data, messages))
+    }
 
-            let original_tokens: u32 = messages.iter().map(|m| Self::estimate_tokens(m)).sum();
-            let compressed_tokens = Self::estimate_tokens(&summary);
-
-            return Ok(SummaryResult {
-                summary,
-                key_decisions,
-                action_items,
-                original_tokens,
-                compressed_tokens,
-            });
-        }
-
-        let tc = &response.tool_calls[0];
-        let args = &tc.arguments;
-
-        let summary = args
+    /// 从 JSON 数据解析摘要结果
+    fn _parse_summary_from_json(
+        &self,
+        data: &serde_json::Value,
+        messages: &[String],
+    ) -> SummaryResult {
+        let summary = data
             .get("summary")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let key_decisions: Vec<String> = args
+        let key_decisions: Vec<String> = data
             .get("key_decisions")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -299,7 +260,7 @@ impl Summarizer {
                     .collect()
             })
             .unwrap_or_default();
-        let action_items: Vec<String> = args
+        let action_items: Vec<String> = data
             .get("action_items")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -312,13 +273,13 @@ impl Summarizer {
         let original_tokens: u32 = messages.iter().map(|m| Self::estimate_tokens(m)).sum();
         let compressed_tokens = Self::estimate_tokens(&summary);
 
-        Ok(SummaryResult {
+        SummaryResult {
             summary,
             key_decisions,
             action_items,
             original_tokens,
             compressed_tokens,
-        })
+        }
     }
 
     /// 根据触发方式执行压缩（异步版本）
