@@ -6,11 +6,10 @@ use std::time;
 
 use crate::llm::LlmError;
 
-/// HTTP response body (raw text + parsed JSON).
+/// HTTP response body (parsed JSON only — raw body discarded after logging).
 #[derive(Debug)]
 pub struct HttpResponse {
     pub status: u16,
-    pub body: String,
     pub json: serde_json::Value,
 }
 
@@ -83,9 +82,5 @@ pub async fn http_call(
         request_id
     );
 
-    Ok(HttpResponse {
-        status,
-        body: raw_body,
-        json,
-    })
+    Ok(HttpResponse { status, json })
 }

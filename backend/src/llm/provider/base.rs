@@ -4,6 +4,8 @@
 //! ProviderAdapter — 各 Provider 的 API 格式适配 trait
 //! GenericProvider — 通用 LlmProvider 实现
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
 use super::client::http_call;
@@ -40,7 +42,7 @@ pub trait ProviderAdapter: Send + Sync {
 
 /// 通用 Provider — 实现 LlmProvider trait
 pub struct GenericProvider<T: ProviderAdapter> {
-    config: BaseConfig,
+    config: Arc<BaseConfig>,
     client: reqwest::Client,
     adapter: T,
 }
@@ -61,7 +63,7 @@ impl<T: ProviderAdapter> GenericProvider<T> {
             })?;
 
         Ok(Self {
-            config,
+            config: Arc::new(config),
             client,
             adapter,
         })
@@ -76,7 +78,6 @@ impl<T: ProviderAdapter> LlmProvider for GenericProvider<T> {
             .build_request(request, &self.config.default_model);
         let url = self.adapter.endpoint(&self.config.base_url);
         let api_key = self.config.api_key.clone();
-
         let model = &self.config.default_model;
 
         let resp = http_call(&self.client, &url, &body, model, &self.adapter.id(), |b| {

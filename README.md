@@ -87,9 +87,9 @@ backend/src/
 │   │   └── dag.rs             # DAG 编排器（拓扑排序 + 层级并行）
 │   └── provider/              # Provider 实现（适配器模式）
 │       ├── mod.rs
-│       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>
-│       ├── config.rs          # ProviderConfig + LlmConfigStore + build_model_router()
-│       ├── client.rs          # 共享 HTTP 调用逻辑
+│       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>（Arc<BaseConfig>零 clone）
+│       ├── config.rs          # ProviderConfig + LlmConfigStore（router 缓存）+ build_model_router()
+│       ├── client.rs          # 共享 HTTP 调用逻辑（成功路径丢弃 raw body）
 │       ├── openai.rs          # OpenAIAdapter + OpenAIProvider 封装
 │       ├── openai_compat.rs   # macro 生成 NVIDIA/DeepSeek/LLaMA/VLLM 适配（OpenAI 兼容协议）
 │       └── anthropic.rs       # AnthropicAdapter + AnthropicProvider 封装

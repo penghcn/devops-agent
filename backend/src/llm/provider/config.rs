@@ -3,7 +3,7 @@
 //! 从 config.toml 加载 provider 配置。
 //! 配置不可运行时修改（只读），前端仅可查看脱敏后的配置。
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use super::base::BaseConfig;
 use super::{
@@ -55,12 +55,15 @@ impl LlmConfigSnapshot {
 /// 可运行时更新的 LLM 配置存储
 pub struct LlmConfigStore {
     inner: RwLock<LlmConfigSnapshot>,
+    /// 缓存的 ModelRouter，避免每请求重建（新建 reqwest::Client 丢失连接池）
+    cached_router: Mutex<Option<Arc<dyn LlmProvider>>>,
 }
 
 impl Default for LlmConfigStore {
     fn default() -> Self {
         Self {
             inner: RwLock::new(LlmConfigSnapshot::default()),
+            cached_router: Mutex::new(None),
         }
     }
 }
@@ -70,13 +73,14 @@ impl LlmConfigStore {
         Self::default()
     }
 
-    /// 从 ProviderConfig 列表初始化配置
+    /// 从 ProviderConfig 列表初始化配置（同时失效 router 缓存）
     pub fn from_providers(providers: Vec<ProviderConfig>, default_provider: String) -> Self {
         Self {
             inner: RwLock::new(LlmConfigSnapshot {
                 providers,
                 default_provider,
             }),
+            cached_router: Mutex::new(None),
         }
     }
 
@@ -85,10 +89,28 @@ impl LlmConfigStore {
         self.inner.read().unwrap().clone()
     }
 
-    /// 根据当前配置重建 ModelRouter。无有效配置时返回 dummy provider。
+    /// 获取 ModelRouter。首次调用时构建并缓存，后续直接返回 Arc clone。
+    /// 配置变更后调用 invalidate_router_cache() 失效缓存。
     pub fn build_router(&self) -> Arc<dyn LlmProvider> {
+        {
+            let cache = self.cached_router.lock().unwrap();
+            if let Some(ref router) = *cache {
+                return router.clone();
+            }
+        }
+
         let snapshot = self.inner.read().unwrap().clone();
-        build_model_router(&snapshot.providers, &snapshot.default_provider)
+        let router = build_model_router(&snapshot.providers, &snapshot.default_provider);
+
+        let mut cache = self.cached_router.lock().unwrap();
+        *cache = Some(router.clone());
+        router
+    }
+
+    /// 失效 router 缓存（配置变更后调用）
+    pub fn invalidate_router_cache(&self) {
+        let mut cache = self.cached_router.lock().unwrap();
+        *cache = None;
     }
 }
 
