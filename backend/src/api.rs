@@ -1,5 +1,6 @@
 use crate::agent::{AgentRequest, AgentResponse, StreamEvent};
 use crate::config::Config;
+use crate::db::DbPool;
 use crate::llm::LlmConfigStore;
 use crate::sandbox::SandboxFactory;
 use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
@@ -23,6 +24,7 @@ pub struct AppState {
     pub cache_manager: Arc<JenkinsCacheManager>,
     pub llm_config_store: Arc<LlmConfigStore>,
     pub sandbox_factory: Arc<SandboxFactory>,
+    pub db: DbPool,
 }
 
 /// Start the HTTP server
@@ -31,11 +33,21 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
     let cors = build_cors(&state.config.cors_origins);
 
     let port = state.config.backend_port;
-    let app = Router::new()
+    // 认证路由（公开）
+    let auth_routes = Router::new()
+        .route("/api/auth/gitlab/login", get(handle_gitlab_login))
+        .route("/api/auth/gitlab/callback", get(handle_gitlab_callback));
+
+    // 受保护路由
+    let protected_routes = Router::new()
         .route("/api/agent", post(handle_agent))
         .route("/api/agent/stream", post(handle_agent_stream))
         .route("/api/cache", get(handle_cache))
-        .route("/api/llm/config", get(handle_get_llm_config))
+        .route("/api/llm/config", get(handle_get_llm_config));
+
+    let app = Router::new()
+        .merge(auth_routes)
+        .merge(protected_routes)
         .layer(cors)
         .with_state(state);
 
@@ -256,5 +268,66 @@ fn build_cors(origins: &[String]) -> CorsLayer {
             .allow_methods(Any)
             .allow_headers(Any)
             .allow_origin(allowed)
+    }
+}
+
+// ============ Auth Handlers ============
+
+/// GET /api/auth/gitlab/login
+/// 返回 GitLab 授权 URL，前端重定向
+async fn handle_gitlab_login(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let redirect_uri = params
+        .get("redirect_uri")
+        .map(|s| s.as_str())
+        .unwrap_or("http://localhost:3000");
+
+    let auth_url = crate::auth::gitlab_oauth::auth_url(&state.config.auth, redirect_uri);
+    Json(serde_json::json!({ "auth_url": auth_url }))
+}
+
+/// GET /api/auth/gitlab/callback?code=xxx&redirect_uri=yyy
+/// GitLab OAuth 回调，用授权码换取 JWT
+async fn handle_gitlab_callback(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let code = match params.get("code") {
+        Some(c) => c,
+        None => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let redirect_uri = params
+        .get("redirect_uri")
+        .map(|s| s.as_str())
+        .unwrap_or("http://localhost:3000");
+
+    match crate::auth::gitlab_oauth::exchange_code(&state.config.auth, code, redirect_uri).await {
+        Ok(login_result) => {
+            let access_token = crate::auth::jwt::create_access_token(
+                &login_result.username,
+                &login_result.gitlab_id,
+                "user",
+                &state.config.auth.jwt_secret,
+            );
+
+            match access_token {
+                Ok(token) => Ok(Json(serde_json::json!({
+                    "access_token": token,
+                    "username": login_result.username,
+                    "avatar_url": login_result.avatar_url,
+                }))),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to create JWT token");
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "GitLab OAuth exchange failed");
+            Err(StatusCode::UNAUTHORIZED)
+        }
     }
 }

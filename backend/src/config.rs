@@ -46,6 +46,37 @@ impl Default for SandboxConfig {
     }
 }
 
+/// PostgreSQL 数据库配置
+#[derive(Debug, Clone)]
+pub struct PgConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub pool_size: u32,
+}
+
+impl PgConfig {
+    /// 生成 sqlx 连接字符串
+    pub fn connection_url(&self) -> String {
+        format!(
+            "postgresql://{}:{}@{}:{}/{}",
+            self.username, self.password, self.host, self.port, self.database
+        )
+    }
+}
+
+/// GitLab OAuth 认证配置
+#[derive(Debug, Clone)]
+pub struct AuthConfig {
+    pub gitlab_url: String,
+    pub gitlab_client_id: String,
+    pub gitlab_client_secret: String,
+    pub jwt_secret: String,
+    pub session_days: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub log_level: String,
@@ -62,6 +93,8 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     pub api_key: Option<String>,
     pub sandbox: SandboxConfig,
+    pub database: PgConfig,
+    pub auth: AuthConfig,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -263,6 +296,37 @@ impl Config {
         let cubesandbox_envd_url_template =
             conf_get(&conf, "sandbox.cubesandbox.envd_url_template").unwrap_or_default();
 
+        // PostgreSQL
+        let database = PgConfig {
+            host: conf_get(&conf, "database.host").unwrap_or_else(|| "localhost".to_string()),
+            port: conf
+                .get("database.port")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5432),
+            username: conf_get(&conf, "database.username").unwrap_or_default(),
+            password: conf_get(&conf, "database.password").unwrap_or_default(),
+            database: conf_get(&conf, "database.name")
+                .unwrap_or_else(|| "devops_agent".to_string()),
+            pool_size: conf
+                .get("database.pool_size")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10),
+        };
+
+        // Auth
+        let auth = AuthConfig {
+            gitlab_url: conf_get(&conf, "auth.gitlab_url")
+                .or_else(|| conf_get(&conf, "gitlab.url"))
+                .unwrap_or_else(|| "https://gitlab.com".to_string()),
+            gitlab_client_id: conf_get(&conf, "auth.gitlab_client_id").unwrap_or_default(),
+            gitlab_client_secret: conf_get(&conf, "auth.gitlab_client_secret").unwrap_or_default(),
+            jwt_secret: conf_get(&conf, "auth.jwt_secret").unwrap_or_default(),
+            session_days: conf
+                .get("auth.session_days")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30),
+        };
+
         let sandbox = SandboxConfig {
             backends: sandbox_backends,
             timeout_secs: sandbox_timeout_secs,
@@ -293,6 +357,8 @@ impl Config {
             cors_origins,
             api_key,
             sandbox,
+            database,
+            auth,
         };
 
         config.validate_llm()
@@ -347,6 +413,21 @@ impl Config {
                 cubesandbox_allow_internet: true,
                 cubesandbox_envd_port: 49983,
                 cubesandbox_envd_url_template: String::new(),
+            },
+            database: PgConfig {
+                host: "localhost".to_string(),
+                port: 5432,
+                username: "postgres".to_string(),
+                password: "postgres".to_string(),
+                database: "devops_agent_test".to_string(),
+                pool_size: 5,
+            },
+            auth: AuthConfig {
+                gitlab_url: "https://gitlab.com".to_string(),
+                gitlab_client_id: "test-client-id".to_string(),
+                gitlab_client_secret: "test-client-secret".to_string(),
+                jwt_secret: "test-jwt-secret-at-least-32-chars".to_string(),
+                session_days: 30,
             },
         }
     }

@@ -1,9 +1,12 @@
 pub mod agent;
 pub mod api;
+pub mod auth;
 pub mod config;
+pub mod db;
 pub mod harness;
 pub mod llm;
 pub mod memory;
+pub mod permissions;
 pub mod sandbox;
 pub mod security;
 pub mod token;

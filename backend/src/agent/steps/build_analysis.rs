@@ -1,10 +1,8 @@
-use super::super::claude;
 use super::super::step::{Step, StepContext, StepResult};
 use crate::llm::{LlmProvider, PromptBuilder};
 use std::sync::Arc;
 use std::time::Instant;
 
-//#[derive(Default)]
 pub struct BuildAnalysisStep {
     llm_provider: Arc<dyn LlmProvider>,
     llm_model: String,
@@ -52,50 +50,6 @@ impl Step for BuildAnalysisStep {
             build_failure_analysis_prompt(log, result)
         };
 
-        // let raw_result = if let Some(provider) = &self.llm_provider {
-        //     let model = self
-        //         .llm_model
-        //         .as_deref()
-        //         .unwrap_or("gpt-4o-mini")
-        //         .to_string();
-        //     match provider
-        //         .llm_call(&ChatRequest {
-        //             model,
-        //             messages: vec![Message::User {
-        //                 content: prompt.clone(),
-        //             }],
-        //             tools: None,
-        //             temperature: Some(0.0),
-        //             tool_choice: None,
-        //             stop_sequences: None,
-        //             prefill: None,
-        //         })
-        //         .await
-        //     {
-        //         Ok(response) => response.content,
-        //         Err(e) => {
-        //             tracing::warn!(error = %e, model = %self.llm_model.as_deref().unwrap_or("default"), "LlmProvider failed, falling back to Claude Code CLI");
-        //             match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
-        //                 Ok(r) => r,
-        //                 Err(e) => {
-        //                     return StepResult::Failed {
-        //                         error: e.to_string(),
-        //                     };
-        //                 }
-        //             }
-        //         }
-        //     }
-        // } else {
-        //     match claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await {
-        //         Ok(r) => r,
-        //         Err(e) => {
-        //             return StepResult::Failed {
-        //                 error: e.to_string(),
-        //             };
-        //         }
-        //     }
-        // };
-
         let raw_result = match call(&self.llm_provider, &self.llm_model, &prompt).await {
             Ok(r) => r,
             Err(e) => {
@@ -132,24 +86,16 @@ async fn call(
     prompt: &str,
 ) -> anyhow::Result<String> {
     let start = Instant::now();
-    let cc_res = claude::call_claude_code(&prompt, "Bash,Read,Write,Grep,Glob").await?;
-    tracing::info!("cc耗时{:.2}s", start.elapsed().as_secs());
 
     let builder = PromptBuilder::with_static_tools(vec![]);
     let cr = builder
         .build_simple(prompt.to_string())
         .with_model(model.to_string());
 
-    let start = Instant::now();
-    let llm_res = provider.llm_call(&cr).await?;
-    tracing::info!("llm耗时{:.2}s", start.elapsed().as_secs());
+    let res = provider.llm_call(&cr).await?;
+    tracing::info!("llm耗时{:.2}s", start.elapsed().as_secs_f32());
 
-    // 对比实验：Claude Code CLI vs LLM Provider，随机返回其一
-    Ok(if yunli::util::random_f32() < 0.5 {
-        cc_res
-    } else {
-        llm_res.content
-    })
+    Ok(res.content)
 }
 
 fn extract_json(text: &str) -> &str {

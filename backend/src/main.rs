@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use devops_agent::api::AppState;
 use devops_agent::config::Config;
+use devops_agent::db;
 use devops_agent::llm::{ChatRequest, LlmConfigStore};
 use devops_agent::sandbox::{CubeSandboxConfig, SandboxFactory};
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
@@ -56,11 +57,27 @@ async fn run() -> anyhow::Result<()> {
     spawn_llm_health_check(llm_config_store.clone());
     spawn_cache_refresher(cache_manager.clone());
 
+    // 初始化 PostgreSQL 连接池 + 迁移
+    let db = match db::pool::connect(&config.database).await {
+        Ok(pool) => {
+            db::migrate::run_migrations(&pool)
+                .await
+                .expect("Database migration failed");
+            pool
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "PostgreSQL connection failed, continuing without DB");
+            tracing::warn!("Features requiring database will be unavailable");
+            panic!("PostgreSQL is required. Please configure [database] in config.toml");
+        }
+    };
+
     let state = Arc::new(AppState {
         config,
         cache_manager,
         llm_config_store,
         sandbox_factory,
+        db,
     });
 
     devops_agent::api::run(state).await

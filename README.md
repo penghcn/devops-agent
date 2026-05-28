@@ -7,8 +7,24 @@
 backend/src/
 ├── main.rs                    # Axum Web 服务入口
 ├── lib.rs                     # 库入口
-├── config.rs                  # 配置管理
-├── api.rs                     # HTTP 接口层（路由 + 请求/响应处理）
+├── config.rs                  # 配置管理（含 PgConfig、AuthConfig）
+├── api.rs                     # HTTP 接口层（路由 + 请求/响应处理，含认证路由）
+│
+├── auth/                      # 认证模块（新增）
+│   ├── mod.rs
+│   ├── jwt.rs                 # JWT 签发验证
+│   ├── gitlab_oauth.rs        # GitLab OAuth 登录流程
+│   └── middleware.rs          # Axum 认证中间件
+│
+├── db/                        # 数据库模块（新增）
+│   ├── mod.rs
+│   ├── pool.rs                # PostgreSQL 连接池
+│   └── migrate.rs             # 自动迁移（用户/权限/知识库/统计表）
+│
+├── permissions/               # 权限模块（新增）
+│   ├── mod.rs
+│   ├── config.rs              # 从 TOML 加载项目白名单
+│   └── checker.rs             # 权限校验器
 │
 ├── harness/                   # 编排框架
 │   ├── mod.rs
@@ -120,6 +136,10 @@ backend/src/
 ```
 用户请求
   └── api.rs (HTTP 路由层)
+        ├── auth/ → GitLab OAuth 登录 → JWT 签发
+        ├── permissions/ → 项目白名单校验
+        ├── db/ → PostgreSQL 连接池 + 自动迁移
+        │
         └── process_request_with_store()
               ├── Provider Config → build_model_router() → ModelRouter
               │     ├── BaseConfig + ProviderAdapter trait + GenericProvider<T>
