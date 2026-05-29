@@ -26,6 +26,14 @@ backend/src/
 │   ├── config.rs              # 从 TOML 加载项目白名单
 │   └── checker.rs             # 权限校验器
 │
+├── knowledge/                 # 知识库模块（两层检索 + 用户反馈驱动）
+│   ├── mod.rs
+│   ├── fingerprint.rs         # 错误特征码提取（regex 归一化 + SHA256）
+│   ├── embedding.rs           # 远程 Embedding API 调用（DashScope，逗号分隔输出）
+│   ├── store.rs               # PostgreSQL 存储（pg-vec cosine distance 向量检索）
+│   ├── retriever.rs           # 两层检索器（指纹精确 → Embedding 语义，300ms 超时）
+│   └── learner.rs             # 知识写入（用户反馈驱动，点赞入库）
+│
 ├── harness/                   # 编排框架
 │   ├── mod.rs
 │   ├── hook.rs                # Hook trait + 钩子点枚举

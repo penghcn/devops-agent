@@ -1,4 +1,3 @@
-<!-- frontend/src/App.vue -->
 <template>
   <div class="min-h-screen bg-gray-100 p-4">
     <div class="max-w-4xl mx-auto bg-white rounded-lg shadow">
@@ -36,48 +35,7 @@
 
       <!-- 聊天记录 -->
       <div ref="chatContainer" class="h-96 overflow-y-auto p-4 space-y-4">
-        <div v-for="msg in messages" :key="msg.id" class="space-y-2">
-          <!-- 用户消息 -->
-          <div class="flex justify-end">
-            <div class="max-w-[80%] bg-blue-500 text-white rounded-lg px-4 py-2 text-sm">
-              {{ msg.user }}
-            </div>
-          </div>
-
-          <!-- Agent 回复 -->
-          <div class="flex justify-start">
-            <div class="max-w-[95%] bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-              <div v-if="msg._elapsed" class="text-xs text-gray-400 mb-1">
-                耗时 {{ formatElapsed(msg._elapsed) }}
-              </div>
-              <div v-for="(corr, idx) in msg.corrections" :key="idx" class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1 flex items-center gap-1">
-                <span>⚠️</span>
-                <span>{{ corr.kind }} '{{ corr.original }}' 已修正为 '{{ corr.corrected }}'</span>
-              </div>
-              <StructuredResponse
-                v-if="msg.structured_output && Object.keys(msg.structured_output).length > 0"
-                :data="msg.structured_output"
-              />
-              <div v-else class="text-gray-800 text-sm whitespace-pre-wrap">
-                {{ msg.agent }}
-              </div>
-              <details
-                v-if="msg.steps && msg.steps.length > 0"
-                :open="!msg._elapsed"
-                class="text-xs text-gray-500 mt-2 border-t pt-2"
-              >
-                <summary class="cursor-pointer hover:text-gray-700">执行步骤</summary>
-                <ul class="list-disc pl-4 mt-1 space-y-1">
-                  <li v-for="step in msg.steps" :key="step.action" class="text-gray-600">
-                    <span class="font-medium">{{ step.action }}:</span>
-                    <span class="ml-1">{{ step.result }}</span>
-                    <span v-if="step.elapsed" class="ml-1 text-gray-400">({{ formatElapsed(step.elapsed as number) }})</span>
-                  </li>
-                </ul>
-              </details>
-            </div>
-          </div>
-        </div>
+        <ChatMessage v-for="msg in messages" :key="msg.id" :msg="msg" />
         <div v-if="loading" class="flex items-center gap-2 text-gray-400 text-sm">
           <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -112,14 +70,14 @@
 <script setup lang="ts">
 import { ref, nextTick, computed } from 'vue'
 import { callAgentStream, fetchCache } from './api/agent'
-import type { ChatMessage, Correction, JenkinsCache, StreamEvent } from './types'
-import StructuredResponse from './components/StructuredResponse.vue'
+import type { ChatMessage as ChatMessageType, StreamEvent } from './types'
+import ChatMessage from './components/ChatMessage.vue'
 
 const input = ref('')
-const messages = ref<ChatMessage[]>([])
+const messages = ref<ChatMessageType[]>([])
 const loading = ref(false)
 const chatContainer = ref<HTMLDivElement>()
-const cache = ref<JenkinsCache | null>(null)
+const cache = ref<any>(null)
 const selectedJob = ref('')
 const selectedBranch = ref('')
 const loadingElapsed = ref(0)
@@ -129,13 +87,11 @@ let elapsedTimer: ReturnType<typeof setInterval> | null = null
 const jobs = computed(() => cache.value?.jobs || [])
 const branches = computed(() => {
   if (!selectedJob.value) return []
-  return cache.value?.jobs.find(j => j.name === selectedJob.value)?.branches || []
+  return cache.value?.jobs.find((j: any) => j.name === selectedJob.value)?.branches || []
 })
 
-// 启动时加载缓存
-fetchCache().then(c => { cache.value = c }).catch(() => {})
+fetchCache().then((c: any) => { cache.value = c }).catch(() => {})
 
-// 格式化本地时间（RFC3339 → 本地可读格式）
 function formatLocalTime(rfc: string): string {
   if (!rfc) return ''
   const d = new Date(rfc)
@@ -144,7 +100,6 @@ function formatLocalTime(rfc: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-// 格式化耗时
 function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
@@ -152,34 +107,25 @@ function formatElapsed(seconds: number): string {
   return `${s.toFixed(2)}秒`
 }
 
-// 每秒刷新耗时
 function startElapsedTimer() {
   loadingElapsed.value = 0
   if (elapsedTimer) clearInterval(elapsedTimer)
-  elapsedTimer = setInterval(() => {
-    loadingElapsed.value++
-  }, 1000)
+  elapsedTimer = setInterval(() => { loadingElapsed.value++ }, 1000)
 }
 
 function stopElapsedTimer() {
-  if (elapsedTimer) {
-    clearInterval(elapsedTimer)
-    elapsedTimer = null
-  }
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
 }
 
 async function handleSend() {
   if (!input.value.trim() || loading.value) return
-
   const userMsg = input.value.trim()
   loading.value = true
   startElapsedTimer()
 
   const startTime = Date.now()
   const msgId = Date.now()
-
-  // 立即创建空消息占位
-  const newMsg: ChatMessage = {
+  const newMsg: ChatMessageType = {
     id: msgId,
     user: userMsg,
     agent: '正在处理...',
@@ -188,9 +134,7 @@ async function handleSend() {
   messages.value.push(newMsg)
 
   await nextTick()
-  if (chatContainer.value) {
-    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-  }
+  if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
 
   try {
     await callAgentStream(
@@ -200,61 +144,37 @@ async function handleSend() {
         if (!msg) return
 
         switch (event.type) {
-          case 'StepStart': {
-          const desc = event.description || event.action || ''
-          msg.agent = desc.endsWith('...') ? desc : `${desc}...`
-          break
-        }
-
+          case 'StepStart':
+            msg.agent = (event.description || event.action || '').endsWith('...') ? (event.description || event.action || '') : `${event.description || event.action || ''}...`
+            break
           case 'StepDone': {
-            // 更新或追加 step
-            const existingIdx = msg.steps.findIndex(
-              s => s.action === event.action
-            )
-            const stepData = {
-              action: event.action || '',
-              result: event.result || '',
-              elapsed: event.elapsed,
-            }
-            if (existingIdx >= 0) {
-              msg.steps[existingIdx] = stepData
-            } else {
-              msg.steps.push(stepData)
-            }
-            // 更新提示文字
+            const idx = msg.steps.findIndex(s => s.action === event.action)
+            const stepData = { action: event.action || '', result: event.result || '', elapsed: event.elapsed }
+            if (idx >= 0) msg.steps[idx] = stepData
+            else msg.steps.push(stepData)
             msg.agent = event.result || msg.agent
             break
           }
-
-         case 'Complete': {
-            const elapsed = Math.floor((Date.now() - startTime) / 1000)
+          case 'Complete':
             stopElapsedTimer()
             msg.agent = event.output || '处理完成'
             msg.steps = event.steps || msg.steps
             msg.structured_output = event.structured_output
-            if (event.corrections && event.corrections.length > 0) {
-                msg.corrections = event.corrections
-            }
-            msg._elapsed = elapsed
+            msg.knowledge_hit = event.knowledge_hit
+            if (event.corrections?.length) msg.corrections = event.corrections
+            msg._elapsed = Math.floor((Date.now() - startTime) / 1000)
             break
-          }
         }
 
-        // 滚动到底部
         nextTick(() => {
-          if (chatContainer.value) {
-            chatContainer.value!.scrollTop = chatContainer.value!.scrollHeight
-          }
+          if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
         })
       },
     )
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : '未知错误'
     const msg = messages.value.find(m => m.id === msgId)
-    if (msg) {
-      msg.agent = `错误: ${message}`
-      msg.steps = []
-    }
+    if (msg) { msg.agent = `错误: ${message}`; msg.steps = [] }
     stopElapsedTimer()
   } finally {
     loading.value = false

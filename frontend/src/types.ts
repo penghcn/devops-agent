@@ -17,12 +17,20 @@ export interface Correction {
   corrected: string
 }
 
+export interface KnowledgeHit {
+  entry_id: number
+  source: string // 'fingerprint' | 'embedding'
+  confidence: number
+  category: string
+}
+
 export interface AgentResponse {
   success: boolean
   output: string
   steps: AgentStep[]
   structured_output?: Record<string, any>
   corrections?: Correction[]
+  knowledge_hit?: KnowledgeHit
 }
 
 export type StreamEventType =
@@ -44,6 +52,7 @@ export interface StreamEvent {
   steps?: AgentStep[]
   structured_output?: Record<string, any>
   corrections?: Correction[]
+  knowledge_hit?: KnowledgeHit
 }
 
 export interface JenkinsCache {
@@ -58,5 +67,6 @@ export interface ChatMessage {
   steps: AgentStep[]
   structured_output?: Record<string, any>
   corrections?: Correction[]
+  knowledge_hit?: KnowledgeHit
   _elapsed?: number
 }
