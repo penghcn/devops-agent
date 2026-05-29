@@ -4,6 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod harness;
+pub mod knowledge;
 pub mod llm;
 pub mod memory;
 pub mod permissions;

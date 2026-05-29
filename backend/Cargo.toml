@@ -31,6 +31,7 @@ uuid = { version = "1", features = ["v4"] }  # Session IDs
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }  # SQLite + PostgreSQL
 jsonwebtoken = "9"       # JWT 签发 + 验证
 bcrypt = "0.16"          # 密码哈希
+sha2 = "0.10"             # SHA256 指纹哈希
 
 [target.'cfg(target_os = "linux")'.dependencies]
 microsandbox = "0.4"       # 代码沙箱执行（仅 Linux，KVM 依赖在 macOS 不可用）
