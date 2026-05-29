@@ -4,7 +4,7 @@ use crate::agent::intent::{
 };
 use crate::agent::{AgentResponse, StepContext, TaskType};
 use crate::config::Config;
-use crate::knowledge::{KnowledgeLearner, KnowledgeRetriever};
+use crate::knowledge::KnowledgeRetriever;
 use crate::llm::{LlmProvider, StructuredOutput};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
@@ -541,7 +541,6 @@ impl IntentRouter {
         llm_provider: Arc<dyn LlmProvider>,
         llm_model: String,
         knowledge_retriever: Option<Arc<KnowledgeRetriever>>,
-        knowledge_learner: Option<Arc<KnowledgeLearner>>,
     ) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, corrections) = self.identify(prompt).await;
@@ -553,7 +552,6 @@ impl IntentRouter {
             llm_provider.clone(),
             llm_model.clone(),
             knowledge_retriever,
-            knowledge_learner,
         );
 
         let (job_name, branch) = extract_fields(&intent);
@@ -906,7 +904,6 @@ mod tests {
             provider.clone(),
             "gpt-4o-mini".to_string(),
             None,
-            None,
         );
         let _chain2 = to_chain_with_prompt(
             &intent_branch_fix,
@@ -914,14 +911,12 @@ mod tests {
             provider.clone(),
             "gpt-4o-mini".to_string(),
             None,
-            None,
         );
         let _chain3 = to_chain_with_prompt(
             &intent_both_fix,
             "",
             provider,
             "gpt-4o-mini".to_string(),
-            None,
             None,
         );
     }
@@ -967,7 +962,6 @@ mod tests {
             provider.clone(),
             "gpt-4o-mini".to_string(),
             None,
-            None,
         );
         let chain2 = to_chain_with_prompt(
             &intent2,
@@ -975,14 +969,12 @@ mod tests {
             provider.clone(),
             "gpt-4o-mini".to_string(),
             None,
-            None,
         );
         let chain3 = to_chain_with_prompt(
             &intent3,
             "",
             provider,
             "gpt-4o-mini".to_string(),
-            None,
             None,
         );
         assert!(

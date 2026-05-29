@@ -47,8 +47,14 @@ impl Default for SandboxConfig {
 }
 
 /// PostgreSQL 数据库配置
+///
+/// 支持两种配置方式（优先级）：
+/// 1. `url` — 直接传入 `postgres://user:pass@host:port/db` 格式的连接字符串
+/// 2. 组件字段 — host / port / username / password / database（当 url 为空时 fallback）
 #[derive(Debug, Clone)]
 pub struct PgConfig {
+    /// 直接传入的连接 URL（优先）
+    pub url: Option<String>,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -58,12 +64,17 @@ pub struct PgConfig {
 }
 
 impl PgConfig {
-    /// 生成 sqlx 连接字符串
+    /// 生成 sqlx 连接字符串。
+    /// 优先使用 url 字段，否则拼接组件字段。
     pub fn connection_url(&self) -> String {
-        format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            self.username, self.password, self.host, self.port, self.database
-        )
+        if let Some(ref u) = self.url {
+            u.clone()
+        } else {
+            format!(
+                "postgresql://{}:{}@{}:{}/{}",
+                self.username, self.password, self.host, self.port, self.database
+            )
+        }
     }
 }
 
@@ -297,19 +308,29 @@ impl Config {
         let cubesandbox_envd_url_template =
             conf_get(&conf, "sandbox.cubesandbox.envd_url_template").unwrap_or_default();
 
-        // PostgreSQL
+        // PostgreSQL — 支持 [database.pg] url 格式，兼容旧的 database.host 格式
         let database = PgConfig {
-            host: conf_get(&conf, "database.host").unwrap_or_else(|| "localhost".to_string()),
+            url: conf_get(&conf, "database.pg.url"),
+            host: conf_get(&conf, "database.host")
+                .or_else(|| conf_get(&conf, "database.pg.host"))
+                .unwrap_or_else(|| "localhost".to_string()),
             port: conf
                 .get("database.port")
+                .or_else(|| conf.get("database.pg.port"))
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5432),
-            username: conf_get(&conf, "database.username").unwrap_or_default(),
-            password: conf_get(&conf, "database.password").unwrap_or_default(),
+            username: conf_get(&conf, "database.username")
+                .or_else(|| conf_get(&conf, "database.pg.username"))
+                .unwrap_or_default(),
+            password: conf_get(&conf, "database.password")
+                .or_else(|| conf_get(&conf, "database.pg.password"))
+                .unwrap_or_default(),
             database: conf_get(&conf, "database.name")
+                .or_else(|| conf_get(&conf, "database.pg.name"))
                 .unwrap_or_else(|| "devops_agent".to_string()),
             pool_size: conf
                 .get("database.pool_size")
+                .or_else(|| conf.get("database.pg.pool_size"))
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(10),
         };
@@ -419,6 +440,7 @@ impl Config {
                 cubesandbox_envd_url_template: String::new(),
             },
             database: PgConfig {
+                url: None,
                 host: "localhost".to_string(),
                 port: 5432,
                 username: "postgres".to_string(),

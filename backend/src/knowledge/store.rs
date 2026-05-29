@@ -106,7 +106,7 @@ pub async fn find_similar(
          hit_count, confirm_count, deny_count, source_build, created_at, expires_at \
          FROM knowledge_entries \
          WHERE embedding IS NOT NULL AND confidence > 0.3 AND expires_at > now() \
-         ORDER BY embedding <=> $1 \
+         ORDER BY embedding <=> $1::vector \
          LIMIT $2",
     )
     .bind(query_embedding)
@@ -147,6 +147,21 @@ pub async fn deny(pool: &PgPool, entry_id: i32) {
     .bind(entry_id)
     .execute(pool)
     .await;
+}
+
+/// 删除过期条目，返回删除数量。
+pub async fn cleanup_expired(pool: &PgPool) -> u64 {
+    let result = sqlx::query("DELETE FROM knowledge_entries WHERE expires_at <= now()")
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(row) => row.rows_affected(),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to cleanup expired knowledge entries");
+            0
+        }
+    }
 }
 
 /// 获取热门知识条目

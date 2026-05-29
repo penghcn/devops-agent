@@ -3,6 +3,7 @@ use std::sync::Arc;
 use devops_agent::api::AppState;
 use devops_agent::config::Config;
 use devops_agent::db;
+use devops_agent::db::DbPool;
 use devops_agent::llm::{ChatRequest, LlmConfigStore};
 use devops_agent::sandbox::{CubeSandboxConfig, SandboxFactory};
 use devops_agent::tools::jenkins_cache::JenkinsCacheManager;
@@ -77,8 +78,10 @@ async fn run() -> anyhow::Result<()> {
         cache_manager,
         llm_config_store,
         sandbox_factory,
-        db,
+        db: db.clone(),
     });
+
+    spawn_knowledge_cleanup(db);
 
     devops_agent::api::run(state).await
 }
@@ -142,6 +145,19 @@ fn spawn_cache_refresher(cm: Arc<JenkinsCacheManager>) {
             match cm.refresh().await {
                 Ok(()) => tracing::info!("Jenkins cache refreshed"),
                 Err(e) => tracing::warn!("Jenkins cache refresh failed: {}", e),
+            }
+        }
+    });
+}
+
+fn spawn_knowledge_cleanup(db: DbPool) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(86400));
+        loop {
+            interval.tick().await;
+            let deleted = devops_agent::knowledge::store::cleanup_expired(&db).await;
+            if deleted > 0 {
+                tracing::info!(deleted, "Expired knowledge entries cleaned up");
             }
         }
     });

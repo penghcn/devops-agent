@@ -46,3 +46,19 @@ port = 3000
 backend_port = 8080
 cors_origins = ["http://localhost:3000"]
 # api_key = "your-api-key"
+
+# PostgreSQL 配置（两种格式任选其一）
+# 方式 1: 直接传入连接 URL（推荐）
+[database.pg]
+url = "${PG_URL}"          # postgres://user:pass@host:port/database_name
+name = "devops_agent"
+pool_size = 10
+
+# 方式 2: 组件字段（当 url 为空时 fallback）
+# [database]
+# host = "localhost"
+# port = 5432
+# username = "postgres"
+# password = "postgres"
+# name = "devops_agent"
+# pool_size = 10

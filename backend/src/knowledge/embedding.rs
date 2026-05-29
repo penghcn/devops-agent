@@ -63,3 +63,40 @@ fn truncate_for_embedding(text: &str) -> String {
         text.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_long_text() {
+        let long = "a".repeat(3000);
+        let truncated = truncate_for_embedding(&long);
+        assert_eq!(truncated.chars().count(), 1500);
+    }
+
+    #[test]
+    fn test_truncate_short_text() {
+        let short = "short error";
+        let truncated = truncate_for_embedding(short);
+        assert_eq!(truncated, short);
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        let text = "编译错误".repeat(500); // 2000 chars
+        let truncated = truncate_for_embedding(&text);
+        assert_eq!(truncated.chars().count(), 1500);
+    }
+
+    #[test]
+    fn test_embedding_returns_none_for_empty_key() {
+        // get_embedding returns None when api_key is empty
+        // This is a behavioral check, not a network test
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            get_embedding(&Client::new(), "test", "").await
+        });
+        assert!(result.is_none(), "空 API key 应返回 None");
+    }
+}

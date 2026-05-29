@@ -29,22 +29,27 @@ pub struct AppState {
 
 /// Start the HTTP server
 pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
-    // 构建 CORS 配置：使用配置的 origin 列表，解析失败则回退到 Any
     let cors = build_cors(&state.config.cors_origins);
 
     let port = state.config.backend_port;
-    // 认证路由（公开）
+
+    // 公开路由（无需认证）
     let auth_routes = Router::new()
         .route("/api/auth/gitlab/login", get(handle_gitlab_login))
         .route("/api/auth/gitlab/callback", get(handle_gitlab_callback));
 
-    // 受保护路由
+    // 受保护路由（JWT Bearer 或 X-API-Key 双模式）
     let protected_routes = Router::new()
         .route("/api/agent", post(handle_agent))
         .route("/api/agent/stream", post(handle_agent_stream))
         .route("/api/cache", get(handle_cache))
         .route("/api/llm/config", get(handle_get_llm_config))
-        .route("/api/knowledge/feedback", post(handle_knowledge_feedback));
+        .route("/api/knowledge/feedback", post(handle_knowledge_feedback))
+        .route("/api/knowledge/learn", post(handle_knowledge_learn))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::middleware::auth_guard,
+        ));
 
     let app = Router::new()
         .merge(auth_routes)
@@ -64,8 +69,6 @@ async fn handle_agent(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     req: Request<Body>,
 ) -> Result<Json<AgentResponse>, StatusCode> {
-    check_api_key(&state.config, &req)?;
-
     let body = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -86,8 +89,6 @@ async fn handle_agent_stream(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     req: Request<Body>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, axum::http::Error>>>, StatusCode> {
-    check_api_key(&state.config, &req)?;
-
     let body = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -96,6 +97,7 @@ async fn handle_agent_stream(
     let config = state.config.clone();
     let cache_manager = state.cache_manager.clone();
     let llm_config_store = state.llm_config_store.clone();
+    let db = state.db.clone();
 
     // Internal channel: Step events
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<StreamEvent>(32);
@@ -117,7 +119,7 @@ async fn handle_agent_stream(
     let tx_clone = event_tx.clone();
     tokio::spawn(async move {
         let response =
-            process_request_stream(req, &config, cache_manager, &llm_config_store, tx_clone).await;
+            process_request_stream(req, &config, cache_manager, &llm_config_store, db, tx_clone).await;
 
         let success = response
             .steps
@@ -157,6 +159,7 @@ async fn process_request_stream(
     config: &Config,
     cache: Arc<JenkinsCacheManager>,
     store: &LlmConfigStore,
+    db: DbPool,
     sender: Arc<tokio::sync::mpsc::Sender<StreamEvent>>,
 ) -> AgentResponse {
     let llm_provider = store.build_router();
@@ -170,13 +173,18 @@ async fn process_request_stream(
 
     let (intent, corrections) = intent_router.identify(&req.prompt).await;
 
+    // 构造知识库检索器
+    let retriever = crate::knowledge::KnowledgeRetriever::new(
+        db,
+        config.embedding_api_key.clone().unwrap_or_default(),
+    );
+
     let chain = crate::agent::chain_mapping::to_chain_with_prompt(
         &intent,
         &req.prompt,
         llm_provider.clone(),
         default_model.clone(),
-        None,
-        None,
+        Some(Arc::new(retriever)),
     );
 
     let (job_name, branch) = crate::agent::intent::extract_fields(&intent);
@@ -212,10 +220,8 @@ async fn process_request_stream(
 
 async fn handle_cache(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-    req: Request<Body>,
+    _req: Request<Body>,
 ) -> Result<Json<JenkinsCache>, StatusCode> {
-    check_api_key(&state.config, &req)?;
-
     let cache = state.cache_manager.get_cached().await;
     match cache {
         Some(c) => Ok(Json(c)),
@@ -228,10 +234,8 @@ async fn handle_cache(
 
 async fn handle_get_llm_config(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-    req: Request<Body>,
+    _req: Request<Body>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    check_api_key(&state.config, &req)?;
-
     let snapshot = state.llm_config_store.snapshot().with_masked_keys();
     Ok(Json(serde_json::json!({
         "success": true,
@@ -245,8 +249,6 @@ async fn handle_knowledge_feedback(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     req: Request<Body>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    check_api_key(&state.config, &req)?;
-
     let body = axum::body::to_bytes(req.into_body(), 1024)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -286,22 +288,50 @@ struct FeedbackRequest {
     action: String, // "confirm" | "deny"
 }
 
-/// Check API key from request headers
-fn check_api_key(config: &Config, req: &Request<Body>) -> Result<(), StatusCode> {
-    if let Some(ref api_key) = config.api_key {
-        let valid = req
-            .headers()
-            .get("X-API-Key")
-            .and_then(|h| h.to_str().ok())
-            .map(|k| k == api_key.as_str())
-            .unwrap_or(false);
+/// POST /api/knowledge/learn
+/// 用户点赞 LLM 生成的方案 → 写入知识库（Flow B 闭环）
+async fn handle_knowledge_learn(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: Request<Body>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let learn_req: LearnRequest =
+        serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-        if valid {
-            return Ok(());
+    let learner = crate::knowledge::KnowledgeLearner::new(
+        state.db.clone(),
+        state
+            .config
+            .embedding_api_key
+            .clone()
+            .unwrap_or_default(),
+    );
+
+    // 使用方案文本作为错误文本提取指纹（不完美，但可用）
+    let result = learner
+        .on_confirm(&learn_req.solution, &learn_req.solution, None)
+        .await;
+
+    match result {
+        Ok(_) => Ok(Json(serde_json::json!({
+            "success": true,
+            "message": "Knowledge entry created from AI solution"
+        }))),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to learn from AI solution");
+            Ok(Json(serde_json::json!({
+                "success": true,
+                "message": "Learned with warning"
+            })))
         }
-        return Err(StatusCode::UNAUTHORIZED);
     }
-    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct LearnRequest {
+    solution: String,
 }
 
 /// 构建 CORS 中间件。解析配置的 origin 列表，失败则回退到 Any。

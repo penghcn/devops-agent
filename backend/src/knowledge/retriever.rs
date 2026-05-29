@@ -3,6 +3,8 @@
 //! 第一层：指纹哈希精确匹配（O(1)）
 //! 第二层：远程 Embedding + pg-vec 向量余弦相似度检索
 
+use std::sync::Arc;
+
 use sqlx::PgPool;
 
 use super::embedding;
@@ -38,6 +40,7 @@ impl SearchHit {
 pub struct KnowledgeRetriever {
     pool: PgPool,
     embedding_api_key: String,
+    http_client: Arc<reqwest::Client>,
 }
 
 impl KnowledgeRetriever {
@@ -45,6 +48,7 @@ impl KnowledgeRetriever {
         Self {
             pool,
             embedding_api_key,
+            http_client: Arc::new(reqwest::Client::new()),
         }
     }
 
@@ -71,7 +75,7 @@ impl KnowledgeRetriever {
         let embedding = match tokio::time::timeout(
             std::time::Duration::from_millis(300),
             embedding::get_embedding(
-                &reqwest::Client::new(),
+                &self.http_client,
                 build_log,
                 &self.embedding_api_key,
             ),

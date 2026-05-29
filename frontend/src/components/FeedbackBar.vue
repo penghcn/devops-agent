@@ -23,41 +23,49 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { KnowledgeHit } from '../types'
+import { ref } from 'vue'
+import { request } from '../api/client'
 
 const props = defineProps<{
-  hit: KnowledgeHit
+  /** 知识库条目 ID（可选，LLM 方案时无此值） */
+  entryId?: number
+  /** 来源说明文本 */
+  sourceText: string
+  /** AI 生成的解决方案文本（仅当无 entryId 时使用） */
+  solution?: string
 }>()
 
 const submitted = ref(false)
 
-const sourceText = computed(() => {
-  const sourceLabel = props.hit.source === 'fingerprint' ? '指纹精确匹配' : '向量语义匹配'
-  return `💡 来自知识库 (${sourceLabel}, 置信度 ${(props.hit.confidence * 100).toFixed(0)}%)`
-})
-
 async function handleConfirm() {
   if (submitted.value) return
   submitted.value = true
-  await sendFeedback(props.hit.entry_id, 'confirm')
+  if (props.entryId) {
+    // Flow A: 更新已有条目置信度
+    await request('/api/knowledge/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry_id: props.entryId, action: 'confirm' }),
+    })
+  } else {
+    // Flow B: 写入新条目到知识库
+    await request('/api/knowledge/learn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ solution: props.solution }),
+    })
+  }
 }
 
 async function handleDeny() {
   if (submitted.value) return
   submitted.value = true
-  await sendFeedback(props.hit.entry_id, 'deny')
-}
-
-async function sendFeedback(entryId: number, action: string) {
-  try {
-    await fetch('/api/knowledge/feedback', {
+  if (props.entryId) {
+    await request('/api/knowledge/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entry_id: entryId, action }),
+      body: JSON.stringify({ entry_id: props.entryId, action: 'deny' }),
     })
-  } catch (err) {
-    console.error('Feedback error:', err)
   }
 }
 </script>

@@ -4,6 +4,8 @@
 //! 1. API Key（向后兼容，管理员权限）
 //! 2. JWT Bearer Token（用户级权限）
 
+use std::sync::Arc;
+
 use axum::{
     body::Body,
     extract::State,
@@ -28,7 +30,7 @@ pub struct AuthenticatedUser {
 /// 检查 Authorization header 或 X-API-Key header。
 /// 认证通过后将用户信息注入请求扩展。
 pub async fn auth_guard(
-    state: State<AppState>,
+    State(state): State<Arc<AppState>>,
     mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -60,7 +62,12 @@ pub async fn auth_guard(
         }
     }
 
-    // 3. 公开端点放行（在白名单中）
+    // 3. 如果未配置 api_key，放行（内部部署模式）
+    if state.config.api_key.is_none() {
+        return Ok(next.run(req).await);
+    }
+
+    // 4. 公开端点放行（在白名单中）
     let path = req.uri().path().to_string();
     if is_public_path(&path) {
         return Ok(next.run(req).await);
@@ -91,7 +98,10 @@ fn extract_api_key(req: &Request<Body>) -> Option<String> {
 
 /// 检查路径是否为公开端点
 fn is_public_path(path: &str) -> bool {
-    path == "/api/auth/gitlab/login" || path == "/api/auth/gitlab/callback" || path == "/health"
+    path == "/api/auth/gitlab/login"
+        || path == "/api/auth/gitlab/callback"
+        || path == "/health"
+        || path.starts_with("/api/auth/")
 }
 
 /// 从请求扩展中获取用户信息

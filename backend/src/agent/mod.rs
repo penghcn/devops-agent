@@ -131,7 +131,6 @@ pub async fn process_request(
             llm_provider,
             default_model,
             None,
-            None,
         )
         .await
 }
@@ -155,7 +154,6 @@ pub async fn process_request_with_store(
             Arc::new(config.clone()),
             llm_provider,
             default_model,
-            None,
             None,
         )
         .await

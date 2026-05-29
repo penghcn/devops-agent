@@ -2,14 +2,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::super::step::{Step, StepContext, StepResult};
-use crate::knowledge::{KnowledgeLearner, KnowledgeRetriever, SearchSource};
+use crate::knowledge::{KnowledgeRetriever, SearchSource};
 use crate::llm::{LlmProvider, PromptBuilder};
 
 pub struct BuildAnalysisStep {
     llm_provider: Arc<dyn LlmProvider>,
     llm_model: String,
     knowledge_retriever: Option<Arc<KnowledgeRetriever>>,
-    knowledge_learner: Option<Arc<KnowledgeLearner>>,
 }
 
 impl BuildAnalysisStep {
@@ -17,13 +16,11 @@ impl BuildAnalysisStep {
         provider: Arc<dyn LlmProvider>,
         model: String,
         retriever: Option<Arc<KnowledgeRetriever>>,
-        learner: Option<Arc<KnowledgeLearner>>,
     ) -> Self {
         Self {
             llm_provider: provider,
             llm_model: model,
             knowledge_retriever: retriever,
-            knowledge_learner: learner,
         }
     }
 }

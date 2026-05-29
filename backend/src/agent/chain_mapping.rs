@@ -7,7 +7,7 @@ use crate::agent::steps::{
     jenkins_status::JenkinsStatusStep, jenkins_trigger::JenkinsTriggerStep,
     jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep,
 };
-use crate::knowledge::{KnowledgeLearner, KnowledgeRetriever};
+use crate::knowledge::KnowledgeRetriever;
 use crate::llm::LlmProvider;
 
 /// Map Intent to StepChain
@@ -17,7 +17,6 @@ pub fn to_chain_with_prompt(
     llm_provider: Arc<dyn LlmProvider>,
     llm_model: String,
     knowledge_retriever: Option<Arc<KnowledgeRetriever>>,
-    knowledge_learner: Option<Arc<KnowledgeLearner>>,
 ) -> StepChain {
     match intent {
         Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
@@ -29,7 +28,6 @@ pub fn to_chain_with_prompt(
                 llm_provider.clone(),
                 llm_model.clone(),
                 knowledge_retriever.clone(),
-                knowledge_learner.clone(),
             )),
         ]),
         Intent::QueryPipeline { .. } => {
@@ -42,7 +40,6 @@ pub fn to_chain_with_prompt(
                 llm_provider,
                 llm_model,
                 knowledge_retriever,
-                knowledge_learner,
             )),
         ]),
         Intent::General => {
@@ -87,7 +84,6 @@ mod tests {
             provider,
             "gpt-4o-mini".to_string(),
             None,
-            None,
         );
 
         let names = chain.step_names();
@@ -106,7 +102,6 @@ mod tests {
             "test prompt",
             provider,
             "gpt-4o-mini".to_string(),
-            None,
             None,
         );
 
@@ -127,7 +122,6 @@ mod tests {
             "deploy test",
             provider,
             "gpt-4o-mini".to_string(),
-            None,
             None,
         );
 
@@ -159,7 +153,6 @@ mod tests {
             provider,
             "gpt-4o-mini".to_string(),
             None,
-            None,
         );
 
         let names = chain.step_names();
@@ -183,7 +176,6 @@ mod tests {
             "analyze test",
             provider,
             "gpt-4o-mini".to_string(),
-            None,
             None,
         );
 

@@ -28,6 +28,7 @@ logs/
 
 # Plans (internal temporary files)
 .planning/
+.codegraph
 
 # Secret / key files
 *.pem

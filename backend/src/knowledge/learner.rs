@@ -2,6 +2,8 @@
 //!
 //! 只有用户点赞后才写入知识库。
 
+use std::sync::Arc;
+
 use sqlx::PgPool;
 
 use super::embedding;
@@ -12,6 +14,7 @@ use super::store;
 pub struct KnowledgeLearner {
     pool: PgPool,
     embedding_api_key: String,
+    http_client: Arc<reqwest::Client>,
 }
 
 impl KnowledgeLearner {
@@ -19,6 +22,7 @@ impl KnowledgeLearner {
         Self {
             pool,
             embedding_api_key,
+            http_client: Arc::new(reqwest::Client::new()),
         }
     }
 
@@ -34,8 +38,7 @@ impl KnowledgeLearner {
 
         // 尝试获取 Embedding
         let embedding_result = if !self.embedding_api_key.is_empty() {
-            let client = reqwest::Client::new();
-            embedding::get_embedding(&client, build_log, &self.embedding_api_key).await
+            embedding::get_embedding(&self.http_client, build_log, &self.embedding_api_key).await
         } else {
             None
         };

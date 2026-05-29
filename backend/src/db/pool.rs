@@ -11,12 +11,17 @@ pub type DbPool = PgPool;
 /// 创建 PostgreSQL 连接池
 pub async fn connect(config: &PgConfig) -> anyhow::Result<DbPool> {
     let url = config.connection_url();
-    tracing::info!(
-        host = %config.host,
-        port = config.port,
-        database = %config.database,
-        "Connecting to PostgreSQL"
-    );
+
+    if let Some(ref u) = config.url {
+        tracing::info!(url = %redact_url(u), "Connecting to PostgreSQL via direct URL");
+    } else {
+        tracing::info!(
+            host = %config.host,
+            port = config.port,
+            database = %config.database,
+            "Connecting to PostgreSQL"
+        );
+    }
 
     let pool = PgPool::connect(&url)
         .await
@@ -32,4 +37,17 @@ pub async fn health_check(pool: &DbPool) -> anyhow::Result<()> {
         .await
         .map(|_| ())
         .map_err(|e| anyhow::anyhow!("PostgreSQL health check failed: {}", e))
+}
+
+/// 脱敏 URL 日志：只保留 scheme + host:port，隐藏 user/password/db
+fn redact_url(url: &str) -> String {
+    if let Some(idx) = url.find("://") {
+        let scheme = &url[..idx];
+        let rest = &url[idx + 3..];
+        if let Some(at_idx) = rest.find('@') {
+            let hostpart = &rest[at_idx + 1..];
+            return format!("{}://****@{}", scheme, hostpart);
+        }
+    }
+    "****".to_string()
 }

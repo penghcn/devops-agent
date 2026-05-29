@@ -24,7 +24,11 @@
         <div v-else class="text-gray-800 text-sm whitespace-pre-wrap">
           {{ msg.agent }}
         </div>
-        <FeedbackBar v-if="msg.knowledge_hit" :hit="msg.knowledge_hit" />
+        <FeedbackBar
+          :entry-id="msg.knowledge_hit?.entry_id"
+          :source-text="feedbackSourceText(msg)"
+          :solution="msg.agent"
+        />
         <details
           v-if="msg.steps && msg.steps.length > 0"
           :open="!msg._elapsed"
@@ -58,5 +62,13 @@ function formatElapsed(seconds: number): string {
   const s = seconds % 60
   if (m > 0) return `${m}分${s.toFixed(2)}秒`
   return `${s.toFixed(2)}秒`
+}
+
+function feedbackSourceText(msg: ChatMessage): string {
+  if (msg.knowledge_hit) {
+    const label = msg.knowledge_hit.source === 'fingerprint' ? '指纹精确匹配' : '向量语义匹配'
+    return `💡 知识库 (${label}, ${(msg.knowledge_hit.confidence * 100).toFixed(0)}%)`
+  }
+  return '🤖 AI 分析结果'
 }
 </script>

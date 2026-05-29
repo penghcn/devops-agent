@@ -1,12 +1,13 @@
 import type { AgentRequest, AgentResponse, JenkinsCache, StreamEvent } from '../types'
+import { request } from './client'
 
 const API_BASE = '/api'
 
-export async function callAgent(request: AgentRequest): Promise<AgentResponse> {
-  const response = await fetch(`${API_BASE}/agent`, {
+export async function callAgent(requestBody: AgentRequest): Promise<AgentResponse> {
+  const response = await request(`${API_BASE}/agent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    body: JSON.stringify(requestBody),
   })
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
@@ -15,13 +16,13 @@ export async function callAgent(request: AgentRequest): Promise<AgentResponse> {
 }
 
 export async function callAgentStream(
-  request: AgentRequest,
+  requestBody: AgentRequest,
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/agent/stream`, {
+  const response = await request(`${API_BASE}/agent/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    body: JSON.stringify(requestBody),
   })
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
@@ -61,7 +62,7 @@ export async function callAgentStream(
 }
 
 export async function fetchCache(): Promise<JenkinsCache> {
-  const response = await fetch(`${API_BASE}/cache`)
+  const response = await request(`${API_BASE}/cache`)
   if (!response.ok) {
     throw new Error(`Failed to fetch cache: ${response.status}`)
   }
