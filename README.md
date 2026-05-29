@@ -8,7 +8,7 @@ backend/src/
 ├── main.rs                    # Axum Web 服务入口
 ├── lib.rs                     # 库入口
 ├── config.rs                  # 配置管理（含 PgConfig、AuthConfig）
-├── api.rs                     # HTTP 接口层（路由 + 请求/响应处理，含认证路由）
+├── api.rs                     # HTTP 接口层（路由 + auth_guard layer + knowledge/learn 端点）
 │
 ├── auth/                      # 认证模块（新增）
 │   ├── mod.rs
@@ -30,9 +30,9 @@ backend/src/
 │   ├── mod.rs
 │   ├── fingerprint.rs         # 错误特征码提取（regex 归一化 + SHA256）
 │   ├── embedding.rs           # 远程 Embedding API 调用（DashScope，逗号分隔输出）
-│   ├── store.rs               # PostgreSQL 存储（pg-vec cosine distance 向量检索）
-│   ├── retriever.rs           # 两层检索器（指纹精确 → Embedding 语义，300ms 超时）
-│   └── learner.rs             # 知识写入（用户反馈驱动，点赞入库）
+│   ├── store.rs               # PostgreSQL 存储（pg-vec cosine distance + $1::vector 显式 cast）
+│   ├── retriever.rs           # 两层检索器（指纹精确 → Embedding 语义，300ms 超时，Arc<Client>）
+│   └── learner.rs             # 知识写入（用户反馈驱动，点赞入库，Arc<Client>）
 │
 ├── harness/                   # 编排框架
 │   ├── mod.rs
@@ -136,7 +136,32 @@ backend/src/
 │       ├── claude_code.rs     # Claude 代码生成（降级方案）
 │       └── tool_use_loop.rs   # ToolUseLoopStep：LLM 原生工具调用循环（前端展示为 Agent）
 │
-└── frontend/                  # Vue 3.5 + TS + Vite 8 + Tailwind CSS 4 前端（SSE 流式推送）
+└── frontend/                  # Vue 3.5 + Vue Router + TS + Vite 8 + Tailwind CSS 4 前端
+    ├── router/                # Vue Router（/chat /dashboard /login）
+    ├── views/                 # 页面视图（ChatView/DashboardView/LoginView）
+    ├── api/                   # API 模块（client 可选认证 + auth/knowledge/stats）
+    └── components/            # 组件（ChatMessage/FeedbackBar/StructuredResponse）
+```
+
+### 知识闭环
+
+```
+Flow A: 知识命中（已有条目）
+  构建日志 → KnowledgeRetriever.search() → 命中 → 返回 solution + entry_id
+  → 前端 FeedbackBar → 用户 👍 → /api/knowledge/feedback → confidence += 0.2
+
+Flow B: 知识自增长（LLM 方案入库）
+  构建日志 → KnowledgeRetriever.search() → 未命中 → LLM 分析
+  → 前端 FeedbackBar（所有回复展示） → 用户 👍 → /api/knowledge/learn → 写入知识库
+```
+
+### 认证模式
+
+```
+受保护路由 → auth_guard middleware（双模式）：
+  1. Authorization: Bearer <JWT> → 用户级权限
+  2. X-API-Key → 管理员权限（向后兼容）
+  3. 未配置 api_key → 放行（内部部署模式）
 ```
 
 ### 模块关系
