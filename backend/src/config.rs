@@ -95,6 +95,7 @@ pub struct Config {
     pub sandbox: SandboxConfig,
     pub database: PgConfig,
     pub auth: AuthConfig,
+    pub embedding_api_key: Option<String>,
 }
 
 /// 过滤无效值：空字符串和占位符视为 None。
@@ -342,6 +343,8 @@ impl Config {
             cubesandbox_envd_url_template,
         };
 
+        let embedding_api_key = conf_get(&conf, "knowledge.embedding_api_key");
+
         let config = Self {
             log_level,
             llm_providers,
@@ -359,6 +362,7 @@ impl Config {
             sandbox,
             database,
             auth,
+            embedding_api_key,
         };
 
         config.validate_llm()
@@ -429,6 +433,7 @@ impl Config {
                 jwt_secret: "test-jwt-secret-at-least-32-chars".to_string(),
                 session_days: 30,
             },
+            embedding_api_key: None,
         }
     }
 }

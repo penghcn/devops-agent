@@ -48,6 +48,17 @@ pub struct AgentResponse {
     pub structured_output: Option<serde_json::Value>, // Claude 结构化分析结果
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub corrections: Vec<Correction>, // job/branch 模糊修正提示
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub knowledge_hit: Option<KnowledgeHitResponse>, // 知识库命中信息
+}
+
+/// 知识库命中响应（前端展示反馈按钮）
+#[derive(Debug, Clone, Serialize)]
+pub struct KnowledgeHitResponse {
+    pub entry_id: i32,
+    pub source: String,       // "fingerprint" | "embedding"
+    pub confidence: f32,
+    pub category: String,
 }
 
 /// 模糊修正记录（job 名或分支名）
@@ -82,6 +93,8 @@ pub enum StreamEvent {
         action: String,
         result: String,
         elapsed: f64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        knowledge_hit: Option<KnowledgeHitResponse>,
     },
     /// 最终完成
     Complete {
@@ -92,6 +105,8 @@ pub enum StreamEvent {
         steps: Vec<AgentStep>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         corrections: Vec<Correction>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        knowledge_hit: Option<KnowledgeHitResponse>,
     },
 }
 
@@ -115,6 +130,8 @@ pub async fn process_request(
             Arc::new(config.clone()),
             llm_provider,
             default_model,
+            None,
+            None,
         )
         .await
 }
@@ -138,6 +155,8 @@ pub async fn process_request_with_store(
             Arc::new(config.clone()),
             llm_provider,
             default_model,
+            None,
+            None,
         )
         .await
 }

@@ -7,6 +7,7 @@ use crate::agent::steps::{
     jenkins_status::JenkinsStatusStep, jenkins_trigger::JenkinsTriggerStep,
     jenkins_wait::JenkinsWaitStep, job_validate::JobValidateStep,
 };
+use crate::knowledge::{KnowledgeLearner, KnowledgeRetriever};
 use crate::llm::LlmProvider;
 
 /// Map Intent to StepChain
@@ -15,6 +16,8 @@ pub fn to_chain_with_prompt(
     prompt: &str,
     llm_provider: Arc<dyn LlmProvider>,
     llm_model: String,
+    knowledge_retriever: Option<Arc<KnowledgeRetriever>>,
+    knowledge_learner: Option<Arc<KnowledgeLearner>>,
 ) -> StepChain {
     match intent {
         Intent::DeployPipeline { .. } | Intent::BuildPipeline { .. } => StepChain::new(vec![
@@ -22,9 +25,11 @@ pub fn to_chain_with_prompt(
             Box::new(JenkinsTriggerStep),
             Box::new(JenkinsWaitStep::default()),
             Box::new(JenkinsLogStep),
-            Box::new(BuildAnalysisStep::with_provider(
+            Box::new(BuildAnalysisStep::new(
                 llm_provider.clone(),
                 llm_model.clone(),
+                knowledge_retriever.clone(),
+                knowledge_learner.clone(),
             )),
         ]),
         Intent::QueryPipeline { .. } => {
@@ -33,7 +38,12 @@ pub fn to_chain_with_prompt(
         Intent::AnalyzeBuild { .. } => StepChain::new(vec![
             Box::new(JobValidateStep),
             Box::new(JenkinsLogStep),
-            Box::new(BuildAnalysisStep::with_provider(llm_provider, llm_model)),
+            Box::new(BuildAnalysisStep::new(
+                llm_provider,
+                llm_model,
+                knowledge_retriever,
+                knowledge_learner,
+            )),
         ]),
         Intent::General => {
             // 两个方案都跑，随机顺序，对比耗时
@@ -76,6 +86,8 @@ mod tests {
             "test prompt",
             provider,
             "gpt-4o-mini".to_string(),
+            None,
+            None,
         );
 
         let names = chain.step_names();
@@ -94,6 +106,8 @@ mod tests {
             "test prompt",
             provider,
             "gpt-4o-mini".to_string(),
+            None,
+            None,
         );
 
         let names = chain.step_names();
@@ -108,8 +122,14 @@ mod tests {
             branch: Some("main".to_string()),
             job_type: crate::agent::intent::JobType::Standard,
         };
-        let chain =
-            to_chain_with_prompt(&intent, "deploy test", provider, "gpt-4o-mini".to_string());
+        let chain = to_chain_with_prompt(
+            &intent,
+            "deploy test",
+            provider,
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
 
         let names = chain.step_names();
         assert_eq!(
@@ -133,8 +153,14 @@ mod tests {
             job_type: crate::agent::intent::JobType::Standard,
         };
         let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
-        let chain =
-            to_chain_with_prompt(&intent, "query test", provider, "gpt-4o-mini".to_string());
+        let chain = to_chain_with_prompt(
+            &intent,
+            "query test",
+            provider,
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
 
         let names = chain.step_names();
         assert_eq!(
@@ -152,8 +178,14 @@ mod tests {
             job_type: crate::agent::intent::JobType::Standard,
         };
         let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider);
-        let chain =
-            to_chain_with_prompt(&intent, "analyze test", provider, "gpt-4o-mini".to_string());
+        let chain = to_chain_with_prompt(
+            &intent,
+            "analyze test",
+            provider,
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
 
         let names = chain.step_names();
         assert_eq!(

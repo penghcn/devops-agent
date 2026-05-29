@@ -1,18 +1,29 @@
-use super::super::step::{Step, StepContext, StepResult};
-use crate::llm::{LlmProvider, PromptBuilder};
 use std::sync::Arc;
 use std::time::Instant;
+
+use super::super::step::{Step, StepContext, StepResult};
+use crate::knowledge::{KnowledgeLearner, KnowledgeRetriever, SearchSource};
+use crate::llm::{LlmProvider, PromptBuilder};
 
 pub struct BuildAnalysisStep {
     llm_provider: Arc<dyn LlmProvider>,
     llm_model: String,
+    knowledge_retriever: Option<Arc<KnowledgeRetriever>>,
+    knowledge_learner: Option<Arc<KnowledgeLearner>>,
 }
 
 impl BuildAnalysisStep {
-    pub fn with_provider(provider: Arc<dyn LlmProvider>, model: String) -> Self {
+    pub fn new(
+        provider: Arc<dyn LlmProvider>,
+        model: String,
+        retriever: Option<Arc<KnowledgeRetriever>>,
+        learner: Option<Arc<KnowledgeLearner>>,
+    ) -> Self {
         Self {
             llm_provider: provider,
             llm_model: model,
+            knowledge_retriever: retriever,
+            knowledge_learner: learner,
         }
     }
 }
@@ -37,6 +48,27 @@ impl Step for BuildAnalysisStep {
             }
         };
 
+        // 第一优先：知识库检索
+        if let Some(retriever) = &self.knowledge_retriever {
+            if let Some(hit) = retriever.search(log).await {
+                ctx.analysis_result = Some(format!(
+                    "知识库命中 ({}): {}",
+                    hit.category, hit.solution
+                ));
+                return StepResult::Success {
+                    message: format!(
+                        "知识库命中 (来源: {}, 置信度: {:.0}%)",
+                        match hit.source {
+                            SearchSource::ExactFingerprint => "指纹精确匹配",
+                            SearchSource::EmbeddingSimilar => "向量语义匹配",
+                        },
+                        hit.confidence * 100.0,
+                    ),
+                };
+            }
+        }
+
+        // 知识库未命中 → 走 LLM 分析
         let result = ctx
             .pipeline_status
             .as_ref()
