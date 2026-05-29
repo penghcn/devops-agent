@@ -1,10 +1,11 @@
 //! 远程 Embedding API 调用。
 //!
 //! 调用阿里云 DashScope text-embedding-v3 模型。
+//! 返回逗号分隔的向量字符串，适配 pg-vec 格式。
 
 use reqwest::Client;
 
-/// 调用远程 Embedding API，返回向量 JSON 字符串
+/// 调用远程 Embedding API，返回逗号分隔的向量字符串（pg-vec 格式）
 pub async fn get_embedding(client: &Client, text: &str, api_key: &str) -> Option<String> {
     if api_key.is_empty() {
         return None;
@@ -36,13 +37,21 @@ pub async fn get_embedding(client: &Client, text: &str, api_key: &str) -> Option
 
     let body: serde_json::Value = resp.json().await.ok()?;
 
-    // 提取第一个向量
+    // 提取第一个向量，转为逗号分隔字符串（pg-vec 格式）
     body.get("output")
         .and_then(|o| o.get("embeddings"))
         .and_then(|e| e.as_array())
         .and_then(|arr| arr.first())
         .and_then(|emb| emb.get("embedding"))
-        .and_then(|vec| vec.to_string().into())
+        .and_then(|vec| {
+            vec.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_f64())
+                    .map(|v| format!("{:.6}", v as f32))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+        })
 }
 
 /// 截断文本以适应 Embedding API 限制（~512 token）

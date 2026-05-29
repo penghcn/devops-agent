@@ -32,6 +32,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "postgre
 jsonwebtoken = "9"       # JWT 签发 + 验证
 bcrypt = "0.16"          # 密码哈希
 sha2 = "0.10"             # SHA256 指纹哈希
+regex = "1"                # 指纹归一化正则
 
 [target.'cfg(target_os = "linux")'.dependencies]
 microsandbox = "0.4"       # 代码沙箱执行（仅 Linux，KVM 依赖在 macOS 不可用）

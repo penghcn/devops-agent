@@ -43,7 +43,8 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
         .route("/api/agent", post(handle_agent))
         .route("/api/agent/stream", post(handle_agent_stream))
         .route("/api/cache", get(handle_cache))
-        .route("/api/llm/config", get(handle_get_llm_config));
+        .route("/api/llm/config", get(handle_get_llm_config))
+        .route("/api/knowledge/feedback", post(handle_knowledge_feedback));
 
     let app = Router::new()
         .merge(auth_routes)
@@ -142,6 +143,7 @@ async fn handle_agent_stream(
                 structured_output: response.structured_output,
                 steps: response.steps,
                 corrections: response.corrections,
+                knowledge_hit: None,
             })
             .await;
     });
@@ -173,6 +175,8 @@ async fn process_request_stream(
         &req.prompt,
         llm_provider.clone(),
         default_model.clone(),
+        None,
+        None,
     );
 
     let (job_name, branch) = crate::agent::intent::extract_fields(&intent);
@@ -184,9 +188,7 @@ async fn process_request_stream(
         branch,
         Arc::new(config.clone()),
     )
-    .with_cache(intent_router.cache().clone())
-    .with_llm_provider(llm_provider)
-    .with_llm_model(default_model);
+    .with_cache(intent_router.cache().clone());
 
     for c in &corrections {
         ctx = ctx.add_correction(c.kind.clone(), c.original.clone(), c.corrected.clone());
@@ -204,6 +206,7 @@ async fn process_request_stream(
         structured_output,
         steps: final_ctx.steps,
         corrections: final_ctx.corrections.clone(),
+        knowledge_hit: None,
     }
 }
 
@@ -234,6 +237,53 @@ async fn handle_get_llm_config(
         "success": true,
         "config": snapshot
     })))
+}
+
+/// POST /api/knowledge/feedback
+/// 接收用户对知识库条目的点赞/点踩反馈
+async fn handle_knowledge_feedback(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: Request<Body>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    check_api_key(&state.config, &req)?;
+
+    let body = axum::body::to_bytes(req.into_body(), 1024)
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let feedback: FeedbackRequest =
+        serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let learner = crate::knowledge::KnowledgeLearner::new(
+        state.db.clone(),
+        state
+            .config
+            .embedding_api_key
+            .clone()
+            .unwrap_or_default(),
+    );
+
+    match feedback.action.as_str() {
+        "confirm" => {
+            learner.confirm_entry(feedback.entry_id).await;
+        }
+        "deny" => {
+            learner.deny_entry(feedback.entry_id).await;
+        }
+        _ => {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": format!("Feedback recorded for entry {}", feedback.entry_id)
+    })))
+}
+
+#[derive(serde::Deserialize)]
+struct FeedbackRequest {
+    entry_id: i32,
+    action: String, // "confirm" | "deny"
 }
 
 /// Check API key from request headers

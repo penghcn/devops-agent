@@ -1,4 +1,6 @@
 //! 知识库 PostgreSQL 存储。
+//!
+//! 使用 pg-vec 进行向量相似度检索。
 
 use chrono::Utc;
 use sqlx::{PgPool, Row};
@@ -79,7 +81,7 @@ pub async fn insert(
 /// 按指纹精确查找
 pub async fn find_by_fingerprint(pool: &PgPool, fingerprint: &str) -> Option<KnowledgeEntry> {
     let row = sqlx::query_as::<_, KnowledgeRow>(
-        "SELECT id, fingerprint, error_text, solution, embedding, category, confidence, \
+        "SELECT id, fingerprint, error_text, solution, embedding::text, category, confidence, \
          hit_count, confirm_count, deny_count, source_build, created_at, expires_at \
          FROM knowledge_entries \
          WHERE fingerprint = $1 AND confidence > 0.3 AND expires_at > now() \
@@ -93,18 +95,21 @@ pub async fn find_by_fingerprint(pool: &PgPool, fingerprint: &str) -> Option<Kno
     Some(row.into())
 }
 
-/// 按指纹模糊查找（用于相似错误）
-pub async fn find_similar(pool: &PgPool, error_text: &str, limit: i32) -> Vec<KnowledgeEntry> {
-    let search_text = format!("%{}%", &error_text.chars().take(50).collect::<String>());
-
+/// 按向量余弦距离查找相似条目（pg-vec cosine similarity）
+pub async fn find_similar(
+    pool: &PgPool,
+    query_embedding: &str,
+    limit: i32,
+) -> Vec<KnowledgeEntry> {
     let rows = sqlx::query_as::<_, KnowledgeRow>(
-        "SELECT id, fingerprint, error_text, solution, embedding, category, confidence, \
+        "SELECT id, fingerprint, error_text, solution, embedding::text, category, confidence, \
          hit_count, confirm_count, deny_count, source_build, created_at, expires_at \
          FROM knowledge_entries \
-         WHERE error_text LIKE $1 AND confidence > 0.3 AND expires_at > now() \
-         ORDER BY confidence DESC LIMIT $2",
+         WHERE embedding IS NOT NULL AND confidence > 0.3 AND expires_at > now() \
+         ORDER BY embedding <=> $1 \
+         LIMIT $2",
     )
-    .bind(&search_text)
+    .bind(query_embedding)
     .bind(limit)
     .fetch_all(pool)
     .await
@@ -147,7 +152,7 @@ pub async fn deny(pool: &PgPool, entry_id: i32) {
 /// 获取热门知识条目
 pub async fn top_entries(pool: &PgPool, limit: i32) -> Vec<KnowledgeEntry> {
     let rows = sqlx::query_as::<_, KnowledgeRow>(
-        "SELECT id, fingerprint, error_text, solution, embedding, category, confidence, \
+        "SELECT id, fingerprint, error_text, solution, embedding::text, category, confidence, \
          hit_count, confirm_count, deny_count, source_build, created_at, expires_at \
          FROM knowledge_entries \
          WHERE confidence > 0.3 AND expires_at > now() \

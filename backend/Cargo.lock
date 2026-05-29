@@ -1201,6 +1201,7 @@ dependencies = [
  "futures",
  "jsonwebtoken 9.3.1",
  "microsandbox",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

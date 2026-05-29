@@ -1,10 +1,11 @@
 //! 两层检索器。
 //!
 //! 第一层：指纹哈希精确匹配（O(1)）
-//! 第二层：模糊文本相似度（LIKE 查询）
+//! 第二层：远程 Embedding + pg-vec 向量余弦相似度检索
 
 use sqlx::PgPool;
 
+use super::embedding;
 use super::fingerprint;
 use super::store;
 
@@ -22,8 +23,8 @@ pub struct SearchHit {
 pub enum SearchSource {
     /// 指纹精确匹配
     ExactFingerprint,
-    /// 模糊文本匹配
-    SimilarText,
+    /// 向量语义匹配
+    EmbeddingSimilar,
 }
 
 impl SearchHit {
@@ -50,7 +51,7 @@ impl KnowledgeRetriever {
     /// 搜索知识库
     ///
     /// 1. 提取指纹 → 精确匹配
-    /// 2. 未命中 → 模糊文本匹配
+    /// 2. 未命中 → Embedding 向量检索（300ms 超时）
     /// 3. 返回最佳结果
     pub async fn search(&self, build_log: &str) -> Option<SearchHit> {
         // 第一层：指纹精确匹配
@@ -66,17 +67,40 @@ impl KnowledgeRetriever {
             });
         }
 
-        // 第二层：模糊文本匹配
-        let entries = store::find_similar(&self.pool, build_log, 3).await;
-        if let Some(best) = entries.first() {
-            store::increment_hit(&self.pool, best.id).await;
-            return Some(SearchHit {
-                entry_id: best.id,
-                solution: best.solution.clone(),
-                confidence: best.confidence,
-                category: best.category.clone(),
-                source: SearchSource::SimilarText,
-            });
+        // 第二层：Embedding 向量检索（300ms 超时）
+        let embedding = match tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            embedding::get_embedding(
+                &reqwest::Client::new(),
+                build_log,
+                &self.embedding_api_key,
+            ),
+        )
+        .await
+        {
+            Ok(Some(emb)) => Some(emb),
+            Ok(None) => {
+                // Embedding API 返回 None（网络错误或解析失败）
+                None
+            }
+            Err(_) => {
+                tracing::debug!("Embedding API timeout (300ms)");
+                None
+            }
+        };
+
+        if let Some(emb) = embedding {
+            let entries = store::find_similar(&self.pool, &emb, 3).await;
+            if let Some(best) = entries.first() {
+                store::increment_hit(&self.pool, best.id).await;
+                return Some(SearchHit {
+                    entry_id: best.id,
+                    solution: best.solution.clone(),
+                    confidence: best.confidence,
+                    category: best.category.clone(),
+                    source: SearchSource::EmbeddingSimilar,
+                });
+            }
         }
 
         None

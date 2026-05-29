@@ -4,6 +4,7 @@ use crate::agent::intent::{
 };
 use crate::agent::{AgentResponse, StepContext, TaskType};
 use crate::config::Config;
+use crate::knowledge::{KnowledgeLearner, KnowledgeRetriever};
 use crate::llm::{LlmProvider, StructuredOutput};
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 use std::sync::Arc;
@@ -539,20 +540,27 @@ impl IntentRouter {
         config: Arc<Config>,
         llm_provider: Arc<dyn LlmProvider>,
         llm_model: String,
+        knowledge_retriever: Option<Arc<KnowledgeRetriever>>,
+        knowledge_learner: Option<Arc<KnowledgeLearner>>,
     ) -> AgentResponse {
         let start = std::time::Instant::now();
         let (intent, corrections) = self.identify(prompt).await;
         let identify_elapsed = start.elapsed().as_millis() as f64 / 1000.0;
 
-        let chain = to_chain_with_prompt(&intent, prompt, llm_provider.clone(), llm_model.clone());
+        let chain = to_chain_with_prompt(
+            &intent,
+            prompt,
+            llm_provider.clone(),
+            llm_model.clone(),
+            knowledge_retriever,
+            knowledge_learner,
+        );
 
         let (job_name, branch) = extract_fields(&intent);
 
         let mut ctx = StepContext::new(prompt.to_string(), task_type, job_name, branch, config)
             .with_cache(self.cache.clone())
-            .with_identify_elapsed(identify_elapsed)
-            .with_llm_provider(llm_provider)
-            .with_llm_model(llm_model);
+            .with_identify_elapsed(identify_elapsed);
         for c in &corrections {
             ctx = ctx.add_correction(c.kind.clone(), c.original.clone(), c.corrected.clone());
         }
@@ -583,6 +591,7 @@ impl IntentRouter {
             structured_output: final_ctx.structured_analysis.clone(),
             steps,
             corrections: final_ctx.corrections.clone(),
+            knowledge_hit: None,
         }
     }
 }
@@ -896,15 +905,25 @@ mod tests {
             "",
             provider.clone(),
             "gpt-4o-mini".to_string(),
+            None,
+            None,
         );
         let _chain2 = to_chain_with_prompt(
             &intent_branch_fix,
             "",
             provider.clone(),
             "gpt-4o-mini".to_string(),
+            None,
+            None,
         );
-        let _chain3 =
-            to_chain_with_prompt(&intent_both_fix, "", provider, "gpt-4o-mini".to_string());
+        let _chain3 = to_chain_with_prompt(
+            &intent_both_fix,
+            "",
+            provider,
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
     }
 
     #[tokio::test]
@@ -942,11 +961,30 @@ mod tests {
 
         // 步骤链也一致
         let provider = crate::llm::router::build_dummy_provider();
-        let chain1 =
-            to_chain_with_prompt(&intent1, "", provider.clone(), "gpt-4o-mini".to_string());
-        let chain2 =
-            to_chain_with_prompt(&intent2, "", provider.clone(), "gpt-4o-mini".to_string());
-        let chain3 = to_chain_with_prompt(&intent3, "", provider, "gpt-4o-mini".to_string());
+        let chain1 = to_chain_with_prompt(
+            &intent1,
+            "",
+            provider.clone(),
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
+        let chain2 = to_chain_with_prompt(
+            &intent2,
+            "",
+            provider.clone(),
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
+        let chain3 = to_chain_with_prompt(
+            &intent3,
+            "",
+            provider,
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+        );
         assert!(
             std::mem::discriminant(&intent1) == std::mem::discriminant(&intent2)
                 && std::mem::discriminant(&intent1) == std::mem::discriminant(&intent3),

@@ -9,5 +9,5 @@ pub mod retriever;
 pub mod store;
 
 pub use learner::KnowledgeLearner;
-pub use retriever::{KnowledgeRetriever, SearchHit};
+pub use retriever::{KnowledgeRetriever, SearchHit, SearchSource};
 pub use store::KnowledgeEntry;

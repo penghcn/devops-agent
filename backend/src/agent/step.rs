@@ -3,7 +3,6 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::config::Config;
-use crate::llm::LlmProvider;
 use crate::tools::jenkins_cache::JenkinsCacheManager;
 
 use super::TaskType;
@@ -47,10 +46,6 @@ pub struct StepContext {
     pub identify_elapsed: Option<f64>,
     /// 模糊修正列表（job/branch）
     pub corrections: Vec<super::Correction>,
-    /// LLM provider passed from IntentRouter for step use
-    pub llm_provider: Option<Arc<dyn LlmProvider>>,
-    /// LLM model name passed from IntentRouter for step use
-    pub llm_model: Option<String>,
 }
 
 impl StepContext {
@@ -77,19 +72,7 @@ impl StepContext {
             step_elapsed: Vec::new(),
             identify_elapsed: None,
             corrections: Vec::new(),
-            llm_provider: None,
-            llm_model: None,
         }
-    }
-
-    pub fn with_llm_provider(mut self, provider: Arc<dyn LlmProvider>) -> Self {
-        self.llm_provider = Some(provider);
-        self
-    }
-
-    pub fn with_llm_model(mut self, model: String) -> Self {
-        self.llm_model = Some(model);
-        self
     }
 
     pub fn with_cache(mut self, cache: Arc<JenkinsCacheManager>) -> Self {
@@ -248,6 +231,7 @@ impl StepChain {
                     action: step_name,
                     result: step_result,
                     elapsed: total_elapsed,
+                    knowledge_hit: None,
                 })
                 .await;
 
