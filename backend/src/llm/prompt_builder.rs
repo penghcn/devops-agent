@@ -1,8 +1,10 @@
 //! Prompt 构建器 — 七层组装，前缀缓存最大化。
+//!
+//! 使用 lellm-core 的 Prompt 和 PromptBuilder 实现分层缓存。
 
 use std::sync::{Arc, OnceLock};
 
-use super::{CacheControl, ChatRequest, ContentBlock, Message, ToolDefinition, ToolDefinitionExt};
+use super::{CacheControl, ChatRequest, Message, Prompt, ToolDefinition, ToolDefinitionExt};
 
 const SYSTEM_CORE: &str = r#"你是 DevOps Agent，专注于 CI/CD 流水线管理、构建分析和部署运维。
 行为准则：
@@ -147,6 +149,7 @@ impl Default for PromptBuilderConfig {
     }
 }
 
+/// 项目 Prompt 构建器 — 基于 lellm-core 的 PromptBuilder
 #[derive(Debug, Clone)]
 pub struct PromptBuilder {
     static_prefix: Arc<StaticPrefix>,
@@ -199,6 +202,7 @@ impl PromptBuilder {
         )
     }
 
+    /// 构建完整的 ChatRequest
     pub fn build(
         &self,
         user_prompt: String,
@@ -208,10 +212,10 @@ impl PromptBuilder {
         request_tools: Vec<ToolDefinition>,
         conversation: Vec<Message>,
     ) -> ChatRequest {
-        let system_blocks = self.build_system_blocks(memory_slots, session);
+        let system_prompt = self.build_system_prompt_inner(memory_slots, session);
         let merged_tools = self.merge_tools(workflow_tools, request_tools);
 
-        let mut messages = vec![Message::system(system_blocks)];
+        let mut messages = vec![Message::system(system_prompt.to_content_blocks())];
         messages.extend(conversation);
         messages.push(Message::user_text(&user_prompt));
 
@@ -231,15 +235,18 @@ impl PromptBuilder {
         }
     }
 
+    /// 构建简易 ChatRequest（仅静态前缀 System + 用户消息）
     pub fn build_simple(&self, user_prompt: String) -> ChatRequest {
-        let system_blocks = vec![ContentBlock::text_with_cache(
-            self.static_prefix.as_str().to_string(),
-            CacheControl::Breakpoint,
-        )];
+        let system_prompt = lellm_core::Prompt::builder()
+            .layer_cached(self.static_prefix.as_str().to_string())
+            .build();
 
         ChatRequest {
             model: String::new(),
-            messages: vec![Message::system(system_blocks), Message::user_text(&user_prompt)],
+            messages: vec![
+                Message::system(system_prompt.to_content_blocks()),
+                Message::user_text(&user_prompt),
+            ],
             tools: None,
             temperature: None,
             tool_choice: None,
@@ -249,18 +256,18 @@ impl PromptBuilder {
         }
     }
 
-    fn build_system_blocks(
+    /// 使用 lellm PromptBuilder 构建 System Prompt
+    fn build_system_prompt_inner(
         &self,
         memory_slots: Vec<MemorySlot>,
         session: &SessionSlots,
-    ) -> Vec<ContentBlock> {
-        let mut blocks = Vec::new();
+    ) -> Prompt {
+        let mut builder = lellm_core::Prompt::builder();
 
-        blocks.push(ContentBlock::text_with_cache(
-            self.static_prefix.as_str().to_string(),
-            CacheControl::Breakpoint,
-        ));
+        // L1~L3: 静态前缀（带缓存断点）
+        builder = builder.layer_cached(self.static_prefix.as_str().to_string());
 
+        // L4: 动态记忆（带缓存标记）
         let injected_memory: Vec<String> = memory_slots
             .into_iter()
             .filter(|m| m.score >= self.config.memory_score_threshold)
@@ -274,21 +281,16 @@ impl PromptBuilder {
                 .map(|(i, m)| format!("  {}. {}", i + 1, m))
                 .collect::<Vec<_>>()
                 .join("\n");
-            blocks.push(ContentBlock::text_with_cache(
-                format!("相关记忆:\n{}", mem_text),
-                CacheControl::Breakpoint,
-            ));
+            builder = builder.layer_cached(format!("相关记忆:\n{}", mem_text));
         }
 
+        // L5: Session 上下文（带缓存断点）
         let session_ctx = session.to_context();
         if !session_ctx.is_empty() {
-            blocks.push(ContentBlock::text_with_cache(
-                format!("会话上下文:\n{}", session_ctx),
-                CacheControl::Breakpoint,
-            ));
+            builder = builder.layer_cached(format!("会话上下文:\n{}", session_ctx));
         }
 
-        blocks
+        builder.build()
     }
 
     fn merge_tools(
@@ -332,11 +334,8 @@ impl PromptBuilder {
         memory_slots: Vec<MemorySlot>,
         session: &SessionSlots,
     ) -> String {
-        self.build_system_blocks(memory_slots, session)
-            .iter()
-            .filter_map(|b| b.as_text().map(|s| s.to_string()))
-            .collect::<Vec<_>>()
-            .join("\n\n")
+        self.build_system_prompt_inner(memory_slots, session)
+            .build_text()
     }
 
     pub fn estimate_system_tokens(&self, system_prompt: &str) -> u32 {
@@ -377,6 +376,7 @@ impl TruncateExt for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ContentBlock;
 
     fn make_builder() -> PromptBuilder {
         PromptBuilder::with_defaults(
@@ -477,14 +477,8 @@ mod tests {
         let req = builder.build("测试提示".into(), vec![], &session, vec![], vec![], vec![]);
 
         if let Message::System { content } = &req.messages[0] {
-            assert!(matches!(
-                content.first(),
-                Some(ContentBlock::Text(_))
-            ));
-            assert!(matches!(
-                content.last(),
-                Some(ContentBlock::Text(_))
-            ));
+            assert!(matches!(content.first(), Some(ContentBlock::Text(_))));
+            assert!(matches!(content.last(), Some(ContentBlock::Text(_))));
         } else {
             panic!("Expected System message");
         }

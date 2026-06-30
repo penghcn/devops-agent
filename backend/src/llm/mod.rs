@@ -13,8 +13,9 @@ pub mod tool_use_loop;
 
 // Re-export lellm-core types as the canonical types
 pub use lellm_core::{
-    CacheControl, ChatRequest, ChatResponse, ContentBlock, ImageSource, Message, TextBlock,
-    ThinkingBlock, TokenUsage, ToolCall, ToolChoice, ToolDefinition, text_block,
+    CacheControl, ChatRequest, ChatResponse, ContentBlock, ImageSource, Message, Prompt,
+    PromptBuilder as LePromptBuilder, TextBlock, ThinkingBlock, TokenUsage, ToolCall, ToolChoice,
+    ToolDefinition, text_block,
 };
 
 // Re-export lellm-core error
