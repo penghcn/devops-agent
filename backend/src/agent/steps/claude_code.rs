@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::claude;
 use super::super::step::{Step, StepContext, StepResult};
-use crate::llm::{ChatRequest, LlmProvider, Message};
+use crate::llm::{ChatRequest, ChatResponseExt, LlmProvider};
 
 pub struct ClaudeCodeStep {
     pub prompt: String,
@@ -50,18 +50,14 @@ impl Step for ClaudeCodeStep {
             match provider
                 .llm_call(&ChatRequest {
                     model,
-                    messages: vec![Message::User {
-                        content: crate::llm::text_block(self.prompt.clone()),
-                    }],
+                    messages: vec![lellm_core::Message::user_text(&self.prompt)],
                     tools: None,
                     temperature: Some(0.6),
-                    tool_choice: None,
-                    stop_sequences: None,
-                    prefill: None,
+                    ..Default::default()
                 })
                 .await
             {
-                Ok(response) => response.content,
+                Ok(response) => response.text_content(),
                 Err(e) => {
                     tracing::warn!(error = %e, model = %self.llm_model.as_deref().unwrap_or("default"), "LlmProvider failed, falling back to Claude Code CLI");
                     match claude::call_claude_code(&self.prompt, &self.allowed_tools).await {

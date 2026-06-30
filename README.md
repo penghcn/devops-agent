@@ -93,7 +93,7 @@ backend/src/
 │   └── gitlab.rs              # GitLab API 封装
 │
 ├── llm/                       # LLM 提供商抽象 + Prompt 构建 + ToolUseLoop
-│   ├── mod.rs                 # LlmProvider trait + Message/ChatRequest 等类型
+│   ├── mod.rs                 # LlmProvider trait + lellm-core 类型 re-export + 扩展 trait
 │   ├── router.rs              # ModelRouter：L1/L2 任务分类 + provider 路由
 │   ├── structured_output.rs   # Schema 强约束输出
 │   ├── prompt_builder.rs      # 七层 Prompt 构建器（静态前缀全局单例 + build_simple 简易模式）
@@ -109,14 +109,9 @@ backend/src/
 │   │   ├── tool_registry.rs   # 工具注册表（精确/同义词/子串搜索 + 分类召回）
 │   │   ├── fallback.rs        # 降级处理器（交接 Claude Code CLI）
 │   │   └── dag.rs             # DAG 编排器（拓扑排序 + 层级并行）
-│   └── provider/              # Provider 实现（适配器模式）
+│   └── provider/              # Provider 实现（基于 lellm-provider）
 │       ├── mod.rs
-│       ├── base.rs            # BaseConfig + ProviderAdapter trait + GenericProvider<T>（Arc<BaseConfig>零 clone）
-│       ├── config.rs          # ProviderConfig + LlmConfigStore（router 缓存）+ build_model_router()
-│       ├── client.rs          # 共享 HTTP 调用逻辑（成功路径丢弃 raw body）
-│       ├── openai.rs          # OpenAIAdapter + OpenAIProvider 封装
-│       ├── openai_compat.rs   # macro 生成 NVIDIA/DeepSeek/LLaMA/VLLM 适配（OpenAI 兼容协议）
-│       └── anthropic.rs       # AnthropicAdapter + AnthropicProvider 封装
+│       └── config.rs          # ProviderConfig + LlmConfigStore（router 缓存）+ CodecProvider 适配
 │
 ├── agent/                     # 意图识别 + 步骤编排
 │   ├── mod.rs                 # Agent 入口

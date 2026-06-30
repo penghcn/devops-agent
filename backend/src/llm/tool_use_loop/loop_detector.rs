@@ -7,14 +7,11 @@ use crate::llm::ToolCall;
 /// 循环干预级别
 #[derive(Debug, Clone)]
 pub enum LoopIntervention {
-    /// Level 2: 警告注入，提示 LLM 改变策略
     Level2 { message: String },
-    /// Level 3: 强制中断，建议降级
     Level3 { message: String },
 }
 
 impl LoopIntervention {
-    /// 生成注入到 LLM 上下文的消息
     pub fn to_injection_message(&self) -> String {
         match self {
             LoopIntervention::Level2 { message } => {
@@ -25,7 +22,7 @@ impl LoopIntervention {
     }
 }
 
-/// 死循环检测器 — 基于滑动窗口检测重复工具调用
+/// 死循环检测器
 pub struct LoopDetector {
     window: usize,
     history: VecDeque<Vec<(String, serde_json::Value)>>,
@@ -41,7 +38,6 @@ impl LoopDetector {
         }
     }
 
-    /// 记录一轮工具调用
     pub fn record(&mut self, calls: &[ToolCall]) {
         let signature = calls
             .iter()
@@ -53,7 +49,6 @@ impl LoopDetector {
         }
     }
 
-    /// 检查是否检测到循环。返回干预级别。
     pub fn is_looping(&mut self) -> Option<LoopIntervention> {
         if self.history.len() < 2 {
             return None;
@@ -61,7 +56,6 @@ impl LoopDetector {
 
         let last = self.history.back()?.clone();
 
-        // 精确重复检测：检查窗口内是否有完全相同的调用
         let mut repeat_count = 0;
         for entry in self.history.iter() {
             if Self::signatures_match(entry, &last) {
@@ -69,7 +63,6 @@ impl LoopDetector {
             }
         }
 
-        // 也检查工具名频率（参数不同但工具名相同）
         let tool_names: HashSet<&str> = last.iter().map(|(n, _)| n.as_str()).collect();
         let mut name_repeat_count = 0;
         for entry in self.history.iter() {

@@ -24,6 +24,8 @@ anyhow = "1"          # 错误处理
 tracing = "0.1"       # 日志
 tracing-subscriber = { version = "0.3", features = ["local-time", "time"] }
 reqwest = { version = "0.12", features = ["json"] }  # HTTP 客户端
+lellm-core = "0.4"                                      # LLM 协议类型
+lellm-provider = "0.4"                                  # LLM Provider 适配器
 tokio-util = "0.7"    # 异步运行时工具
 futures = "0.3"       # SSE 流式响应
 tokio-stream = "0.1"  # SSE ReceiverStream

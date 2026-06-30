@@ -153,21 +153,27 @@ async fn test_run_agent() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// 测试 OpenAIProvider 抽象层（不直接调 HTTP，走完整的 ProviderAdapter 链路）
+/// 测试 OpenAIProvider 抽象层（使用 lellm-provider CodecProvider）
 async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error>> {
-    use devops_agent::llm::provider::base::BaseConfig;
-    use devops_agent::llm::{ChatRequest, LlmProvider, Message, OpenAIProvider, ToolDefinition};
+    use devops_agent::llm::{ChatRequest, ChatResponseExt, LlmProvider, Message, ToolDefinition};
+    use lellm_provider::providers::base::CodecProvider;
+    use lellm_provider::providers::openai_compat::OpenAICompatCodec;
 
     let api_key = std::env::var("LELLM_API_KEY").unwrap_or_default();
     let base_url = std::env::var("LELLM_BASE_URL").unwrap_or_default();
     let model = "code";
 
-    let provider = OpenAIProvider::new(BaseConfig {
-        api_key,
-        base_url,
-        default_model: model.to_string(),
-        timeout_secs: 60,
-    })?;
+    if api_key.is_empty() || base_url.is_empty() {
+        return Ok("Skipped: LELLM_API_KEY or LELLM_BASE_URL not set".to_string());
+    }
+
+    let codec = OpenAICompatCodec::openai();
+    let provider: std::sync::Arc<dyn LlmProvider> = std::sync::Arc::new(
+        CodecProvider::builder(codec)
+            .base_url(&base_url)
+            .api_key(&api_key)
+            .build()?,
+    );
 
     assert_eq!(provider.provider_id(), "openai");
 
@@ -186,12 +192,8 @@ async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error
 
     let user_input = "浦东今天什么天气？";
     let mut messages = vec![
-        Message::System {
-            content: text_block("你是一个有用的助手。如果需要查天气，请调用工具。".to_string()),
-        },
-        Message::User {
-            content: text_block(user_input.to_string()),
-        },
+        Message::system_text("你是一个有用的助手。如果需要查天气，请调用工具。"),
+        Message::user_text(user_input),
     ];
 
     for i in 1..=15 {
@@ -202,29 +204,25 @@ async fn run_openai_provider_agent() -> Result<String, Box<dyn std::error::Error
             messages: messages.clone(),
             tools: Some(tools.clone()),
             temperature: Some(0.0),
-            tool_choice: None,
-            stop_sequences: None,
-            prefill: None,
+            ..Default::default()
         };
 
         let resp = provider.llm_call(&req).await?;
 
         if resp.has_tool_calls() {
-            for tc in &resp.tool_calls {
+            let tool_calls: Vec<_> = resp.tool_calls().cloned().collect();
+            for tc in &tool_calls {
                 let result = execute_tool(tc)?;
                 println!("  工具结果: {}", &result);
-                messages.push(Message::Assistant {
-                    content: vec![],
-                    tool_calls: resp.tool_calls.clone(),
-                });
-                messages.push(Message::ToolResult {
-                    tool_call_id: tc.id.clone(),
-                    content: text_block(result),
-                });
+                messages.push(devops_agent::llm::assistant_with_tools(
+                    resp.content.clone(),
+                    tool_calls.clone(),
+                ));
+                messages.push(Message::tool_result_ok(tc.id.clone(), result));
             }
         } else {
             println!("Provider 层循环了{}轮, 完成", i);
-            return Ok(format!("最终结果: {}", resp.content));
+            return Ok(format!("最终结果: {}", resp.text_content()));
         }
     }
 

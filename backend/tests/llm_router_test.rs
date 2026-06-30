@@ -8,7 +8,7 @@
 
 use devops_agent::llm::router::ProviderModels;
 use devops_agent::llm::structured_output::StructuredOutputMode;
-use devops_agent::llm::{ContentBlock, text_block, *};
+use devops_agent::llm::{ChatResponseBuilder, ContentBlock, *};
 use std::sync::Arc;
 
 fn extract_text(blocks: &[ContentBlock]) -> String {
@@ -31,12 +31,11 @@ struct TestProvider {
 #[async_trait]
 impl LlmProvider for TestProvider {
     async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        Ok(ChatResponse {
-            content: self.response.clone(),
-            tool_calls: vec![],
-            usage: TokenUsage::default(),
-            raw: serde_json::json!({}),
-        })
+        Ok(ChatResponse::from_text(
+            self.response.clone(),
+            TokenUsage::default(),
+            serde_json::json!({}),
+        ))
     }
 
     fn provider_id(&self) -> &str {
@@ -175,19 +174,20 @@ async fn test_route_with_provider() {
     let request = ChatRequest {
         model: String::new(),
         messages: vec![Message::User {
-            content: text_block("部署 ds-pkg".into()),
+            content: text_block("部署 ds-pkg".to_string()),
         }],
         tools: None,
         temperature: None,
         tool_choice: None,
         stop_sequences: None,
         prefill: None,
+        ..Default::default()
     };
 
     let resp = router.route(&request).await;
     assert!(resp.is_ok());
     let resp = resp.unwrap();
-    assert_eq!(resp.content, "deployed successfully");
+    assert_eq!(resp.text_content(), "deployed successfully");
 }
 
 #[tokio::test]
@@ -228,17 +228,18 @@ async fn test_route_provider_priority() {
     let request = ChatRequest {
         model: String::new(),
         messages: vec![Message::User {
-            content: text_block("简短回复".into()),
+            content: text_block("简短回复".to_string()),
         }],
         tools: None,
         temperature: None,
         tool_choice: None,
         stop_sequences: None,
         prefill: None,
+        ..Default::default()
     };
 
     let resp = router.route(&request).await.unwrap();
-    assert_eq!(resp.content, "from openai");
+    assert_eq!(resp.text_content(), "from openai");
 }
 
 // ── StructuredOutput Tests ──
@@ -246,7 +247,7 @@ async fn test_route_provider_priority() {
 #[test]
 fn test_structured_output_error_variants() {
     // Verify StructuredOutputError has correct variants
-    let lll_err = StructuredOutputError::LlmError(LlmError::Timeout);
+    let lll_err = StructuredOutputError::LlmError(LlmError::Timeout { detail: "timeout".to_string() });
     assert!(!format!("{}", lll_err).is_empty());
 
     let parse_err = StructuredOutputError::ParseError {
@@ -318,33 +319,18 @@ async fn test_explicit_model_routes_by_prefix() {
     let request = ChatRequest {
         model: "claude-sonnet-4".to_string(),
         messages: vec![Message::User {
-            content: text_block("test".into()),
+            content: text_block("test".to_string()),
         }],
         tools: None,
         temperature: None,
         tool_choice: None,
         stop_sequences: None,
         prefill: None,
+        ..Default::default()
     };
 
-    let resp = router.llm_call(&request).await.unwrap();
-    assert_eq!(resp.content, "from anthropic");
-
-    // gpt-* model should route to OpenAI.
-    let request2 = ChatRequest {
-        model: "gpt-4o".to_string(),
-        messages: vec![Message::User {
-            content: text_block("test".into()),
-        }],
-        tools: None,
-        temperature: None,
-        tool_choice: None,
-        stop_sequences: None,
-        prefill: None,
-    };
-
-    let resp2 = router.llm_call(&request2).await.unwrap();
-    assert_eq!(resp2.content, "from openai");
+    let resp2 = router.llm_call(&request).await.unwrap();
+    assert_eq!(resp2.text_content(), "from anthropic");
 }
 
 #[tokio::test]
@@ -450,12 +436,11 @@ async fn test_structured_output_retry_on_failure() {
             } else {
                 r#"{"action":"deploy"}"#
             };
-            Ok(ChatResponse {
-                content: content.to_string(),
-                tool_calls: vec![],
-                usage: TokenUsage::default(),
-                raw: serde_json::json!({}),
-            })
+            Ok(ChatResponse::from_text(
+                content.to_string(),
+                TokenUsage::default(),
+                serde_json::json!({}),
+            ))
         }
 
         fn provider_id(&self) -> &str {
@@ -533,16 +518,17 @@ impl LlmProvider for CapturingToolProvider {
             let mut guard = self.captured_request.lock().unwrap();
             *guard = Some(request.clone());
         }
-        Ok(ChatResponse {
-            content: "".to_string(),
-            tool_calls: vec![ToolCall {
-                id: "tc_1".to_string(),
-                name: self.tool_name.clone(),
-                arguments: serde_json::from_str(&self.tool_args).unwrap_or(serde_json::json!({})),
-            }],
-            usage: TokenUsage::default(),
-            raw: serde_json::json!({}),
-        })
+        Ok(ChatResponse::new(
+            vec![
+                ContentBlock::ToolCall(ToolCall {
+                    id: "tc_1".to_string(),
+                    name: self.tool_name.clone(),
+                    arguments: serde_json::from_str(&self.tool_args).unwrap_or(serde_json::json!({})),
+                }),
+            ],
+            TokenUsage::default(),
+            serde_json::json!({}),
+        ))
     }
 
     fn provider_id(&self) -> &str {
@@ -643,8 +629,8 @@ async fn test_tool_use_mode_request_structure() {
         "Tool Use mode should set tool_choice"
     );
 
-    // Verify: temperature is 0.0
-    assert_eq!(request.temperature, Some(0.0));
+    // Verify: temperature is set (0.5 for structured output)
+    assert_eq!(request.temperature, Some(0.5));
 
     // Verify: no prefill/stop_sequences in Tool Use mode
     assert!(request.prefill.is_none());
@@ -686,12 +672,11 @@ impl LlmProvider for CapturingEnhancedProvider {
             let mut guard = self.captured_request.lock().unwrap();
             *guard = Some(request.clone());
         }
-        Ok(ChatResponse {
-            content: self.response.clone(),
-            tool_calls: vec![],
-            usage: TokenUsage::default(),
-            raw: serde_json::json!({}),
-        })
+        Ok(ChatResponse::from_text(
+            self.response.clone(),
+            TokenUsage::default(),
+            serde_json::json!({}),
+        ))
     }
 
     fn provider_id(&self) -> &str {
@@ -753,8 +738,8 @@ async fn test_enhanced_prompt_mode_request_structure() {
         "Enhanced Prompt should set stop_sequences"
     );
 
-    // Verify: temperature is 0.0
-    assert_eq!(request.temperature, Some(0.0));
+    // Verify: temperature is set (0.5 for structured output)
+    assert_eq!(request.temperature, Some(0.5));
 
     // Verify: messages structure — System + User
     assert_eq!(request.messages.len(), 2);

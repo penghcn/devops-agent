@@ -64,9 +64,11 @@ mod tests {
     #[async_trait]
     impl LlmProvider for MockProvider {
         async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-            Err(LlmError::ApiError {
-                status: 500,
-                body: "mock provider - not for real calls".to_string(),
+            Err(LlmError::Provider {
+                provider: "mock".to_string(),
+                status: Some(500),
+                code: None,
+                message: "mock provider - not for real calls".to_string(),
             })
         }
 

@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use super::super::step::{Step, StepContext, StepResult};
 use crate::knowledge::{KnowledgeRetriever, SearchSource};
-use crate::llm::{LlmProvider, PromptBuilder};
+use crate::llm::{ChatResponseExt, LlmProvider, PromptBuilder};
 
 pub struct BuildAnalysisStep {
     llm_provider: Arc<dyn LlmProvider>,
@@ -124,7 +124,7 @@ async fn call(
     let res = provider.llm_call(&cr).await?;
     tracing::info!("llm耗时{:.2}s", start.elapsed().as_secs_f32());
 
-    Ok(res.content)
+    Ok(res.text_content())
 }
 
 fn extract_json(text: &str) -> &str {

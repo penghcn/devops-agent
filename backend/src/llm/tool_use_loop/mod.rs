@@ -1,7 +1,4 @@
 //! ToolUseLoop — LLM ↔ 工具调用闭环
-//!
-//! 负责 LLM 返回 tool_calls → 执行工具 → 结果注入 → 再次调用 LLM 的循环，
-//! 直到 LLM 返回纯文本或达到最大轮次。
 
 mod dag;
 mod executor;
@@ -21,7 +18,10 @@ pub use tool_registry::{ToolRegistry, ToolSearchResult, ToolSource};
 
 use std::sync::Arc;
 
-use crate::llm::{ChatRequest, ChatResponse, LlmError, LlmProvider, Message};
+use crate::llm::{
+    ChatRequest, ChatResponse, LlmError, LlmProvider, Message, ToolCall,
+    assistant_with_tools,
+};
 
 /// 工具执行结果
 #[derive(Debug, Clone)]
@@ -33,11 +33,8 @@ pub enum ToolCallResult {
 /// ToolUseLoop 执行结果
 #[derive(Debug)]
 pub struct ToolUseResult {
-    /// 最终 LLM 响应（纯文本）
     pub response: ChatResponse,
-    /// 完整消息历史（包含所有中间 tool_calls 和 tool_results）
     pub messages: Vec<Message>,
-    /// 实际循环轮次
     pub iterations: usize,
 }
 
@@ -70,7 +67,6 @@ impl ToolUseLoop {
 
     /// 执行 tool-use 循环。
     pub async fn execute(self) -> Result<ToolUseResult, LlmError> {
-        // 复用同一个 ChatRequest，避免每轮克隆 messages/tools
         let mut req = self.request;
 
         for iteration in 1..=self.max_iterations {
@@ -84,24 +80,28 @@ impl ToolUseLoop {
                 });
             }
 
-            req.messages.push(Message::Assistant {
-                content: crate::llm::text_block(response.content.clone()),
-                tool_calls: response.tool_calls.clone(),
-            });
+            // Extract tool calls from response content blocks
+            let tool_calls: Vec<ToolCall> = response.tool_calls().cloned().collect();
 
-            let tool_results = self.executor.execute_batch(&response.tool_calls).await;
+            // Build Assistant message with content + tool calls
+            req.messages
+                .push(assistant_with_tools(response.content.clone(), tool_calls.clone()));
+
+            let tool_results = self.executor.execute_batch(&tool_calls).await;
             req.messages.extend(tool_results);
 
             tracing::debug!(
                 iteration,
-                tool_calls = response.tool_calls.len(),
+                tool_calls = tool_calls.len(),
                 "tool-use loop iteration"
             );
         }
 
-        Err(LlmError::ApiError {
-            status: 0,
-            body: format!("tool-use 循环超过最大轮次限制 ({})", self.max_iterations),
+        Err(LlmError::Provider {
+            provider: "tool_use_loop".to_string(),
+            status: None,
+            code: None,
+            message: format!("tool-use 循环超过最大轮次限制 ({})", self.max_iterations),
         })
     }
 }

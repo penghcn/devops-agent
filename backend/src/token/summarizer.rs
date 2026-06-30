@@ -1,7 +1,7 @@
 use anyhow;
 use std::sync::Arc;
 
-use crate::llm::{ChatRequest, LlmProvider, Message, ToolChoice, ToolDefinition, text_block};
+use crate::llm::{ChatRequest, ChatResponseExt, LlmProvider, Message, ToolChoice, ToolDefinition};
 
 /// 压缩阶段
 #[derive(Debug, Clone, PartialEq)]
@@ -208,15 +208,10 @@ impl Summarizer {
         let request = ChatRequest {
             model: String::new(),
             messages: vec![
-                Message::System {
-                    content: text_block(
-                        "你是一个专业的对话摘要助手。你的任务是将对话压缩为简洁的结构化摘要。"
-                            .to_string(),
-                    ),
-                },
-                Message::User {
-                    content: text_block(prompt),
-                },
+                Message::system_text(
+                    "你是一个专业的对话摘要助手。你的任务是将对话压缩为简洁的结构化摘要。",
+                ),
+                Message::user_text(&prompt),
             ],
             tools: Some(vec![tool]),
             temperature: Some(0.5),
@@ -225,15 +220,16 @@ impl Summarizer {
             }),
             stop_sequences: None,
             prefill: None,
+            ..Default::default()
         };
 
         let response = provider.llm_call(&request).await?;
 
         // 从 tool_calls 或 content 中提取 JSON 数据
-        let data: serde_json::Value = if let Some(tc) = response.tool_calls.first() {
+        let data: serde_json::Value = if let Some(tc) = response.tool_calls().next() {
             tc.arguments.clone()
         } else {
-            serde_json::from_str(&response.content)
+            serde_json::from_str(&response.text_content())
                 .map_err(|e| anyhow::anyhow!("Failed to parse LLM summary response: {}", e))?
         };
 

@@ -7,24 +7,17 @@ use crate::llm::ToolDefinition;
 /// 工具来源分类
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolSource {
-    /// 内置工具（read/write/bash/git）
     Builtin,
-    /// 动态场景工具（Jenkins/GitLab 等）
     Dynamic,
-    /// MCP 代理工具
     Mcp,
-    /// Skill 包装工具
     Skill,
 }
 
-/// 工具搜索结果（包含来源信息）
+/// 工具搜索结果
 #[derive(Debug, Clone)]
 pub struct ToolSearchResult {
-    /// 工具定义
     pub definition: ToolDefinition,
-    /// 来源
     pub source: ToolSource,
-    /// 分类标签
     pub category: String,
 }
 
@@ -34,13 +27,10 @@ impl ToolSearchResult {
     }
 }
 
-/// 工具注册表 — 支持按名称、同义词、分类搜索
+/// 工具注册表
 pub struct ToolRegistry {
-    /// 工具名 → 搜索结果
     tools: HashMap<String, ToolSearchResult>,
-    /// 同义词 → 工具名列表
     synonyms: HashMap<String, Vec<String>>,
-    /// 分类 → 工具名列表
     categories: HashMap<String, Vec<String>>,
 }
 
@@ -53,7 +43,6 @@ impl ToolRegistry {
         }
     }
 
-    /// 注册工具
     pub fn register(&mut self, name: &str, source: ToolSource, def: ToolDefinition) {
         let category = Self::infer_category(name);
         let result = ToolSearchResult {
@@ -68,7 +57,6 @@ impl ToolRegistry {
             .push(name.to_string());
     }
 
-    /// 添加同义词映射
     pub fn add_synonyms(&mut self, tool_name: &str, synonyms: &[&str]) {
         for syn in synonyms {
             self.synonyms
@@ -78,19 +66,16 @@ impl ToolRegistry {
         }
     }
 
-    /// 搜索工具（精确 → 同义词 → 子串兜底）
     pub fn search(&self, query: &str) -> Vec<ToolSearchResult> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
         let mut seen = HashSet::new();
 
-        // 1. 精确匹配
         if let Some(result) = self.tools.get(query) {
             results.push(result.clone());
             seen.insert(query);
         }
 
-        // 2. 同义词匹配
         if let Some(names) = self.synonyms.get(&query_lower) {
             for name in names {
                 if seen.insert(name) {
@@ -101,7 +86,6 @@ impl ToolRegistry {
             }
         }
 
-        // 3. 子串兜底
         if results.is_empty() {
             for (name, result) in &self.tools {
                 if name.to_lowercase().contains(&query_lower) {
@@ -113,7 +97,6 @@ impl ToolRegistry {
         results
     }
 
-    /// 按分类批量召回
     pub fn search_category(&self, category: &str) -> Vec<ToolSearchResult> {
         let mut results = Vec::new();
         if let Some(names) = self.categories.get(category) {
@@ -126,12 +109,10 @@ impl ToolRegistry {
         results
     }
 
-    /// 列出所有工具
     pub fn list_tools(&self) -> Vec<ToolSearchResult> {
         self.tools.values().cloned().collect()
     }
 
-    /// 从工具名推断分类
     fn infer_category(name: &str) -> String {
         if name.starts_with("jenkins") {
             "jenkins".to_string()

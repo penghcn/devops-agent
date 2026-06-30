@@ -31,7 +31,8 @@
 use std::sync::Arc;
 
 use super::{
-    ChatRequest, LlmError, LlmProvider, Message, ToolChoice, ToolDefinition, text_block as tb,
+    ChatRequest, ChatResponseExt, LlmError, LlmProvider, Message, ToolChoice, ToolDefinition,
+    text_block as tb,
 };
 
 /// 结构化输出模式
@@ -174,15 +175,14 @@ impl StructuredOutput {
                     StructuredOutputMode::ToolUse => self
                         .extract_from_tool_use(&response)
                         .ok_or_else(|| StructuredOutputError::ParseError {
-                            response: response.content[..response.content.len().min(200)]
-                                .to_string(),
+                            response: response.text_content()
+                                .chars().take(200).collect(),
                             detail: "No tool call found in response".to_string(),
                         })?,
                     StructuredOutputMode::EnhancedPrompt => {
                         // Prefill `{` 已被模型输出，拼接回去
-                        let content = response.content.trim().to_string();
+                        let content = response.text_content().trim().to_string();
                         if !content.starts_with('{') && attempt == 0 {
-                            // First attempt with prefill: the `{` is the prefill, not in response
                             let prefix = "{";
                             format!("{}{}", prefix, content)
                         } else {
@@ -249,10 +249,7 @@ impl StructuredOutput {
             messages.push(Message::User {
                 content: tb(user_prompt.to_string()),
             });
-            messages.push(Message::Assistant {
-                content: tb(last.clone()),
-                tool_calls: Vec::new(),
-            });
+            messages.push(Message::assistant(tb(last.clone())));
             messages.push(Message::User {
                 content: tb(format!(
                     "你的上一次输出不符合 JSON Schema。错误: {}。\n请重新调用工具输出正确的 JSON。",
@@ -275,6 +272,7 @@ impl StructuredOutput {
             }),
             stop_sequences: None,
             prefill: None,
+            ..Default::default()
         }
     }
 
@@ -308,10 +306,7 @@ impl StructuredOutput {
             messages.push(Message::User {
                 content: tb(user_prompt.to_string()),
             });
-            messages.push(Message::Assistant {
-                content: tb(last.clone()),
-                tool_calls: Vec::new(),
-            });
+            messages.push(Message::assistant(tb(last.clone())));
             messages.push(Message::User {
                 content: tb(format!(
                     "你的上一次输出不符合 JSON Schema。错误: {}。\n请直接输出 JSON，以 {{ 开头。",
@@ -335,13 +330,14 @@ impl StructuredOutput {
             tool_choice: None,
             stop_sequences: Some(vec!["\n\n\n".to_string(), "```\n".to_string()]),
             prefill: Some("{}".to_string()),
+            ..Default::default()
         }
     }
 
     /// 从 Tool Use 响应中提取 JSON 字符串
     fn extract_from_tool_use(&self, response: &super::ChatResponse) -> Option<String> {
         // Find the tool call matching our tool name
-        for tc in &response.tool_calls {
+        for tc in response.tool_calls() {
             if tc.name == self.tool_name {
                 return Some(tc.arguments.to_string());
             }
@@ -473,7 +469,7 @@ impl StructuredOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::ChatResponse;
+    use crate::llm::{ChatResponse, ChatResponseBuilder};
     use serde::Deserialize;
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -608,12 +604,11 @@ mod tests {
     #[async_trait::async_trait]
     impl LlmProvider for MockProvider {
         async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-            Ok(ChatResponse {
-                content: "{}".into(),
-                tool_calls: Vec::new(),
-                usage: Default::default(),
-                raw: serde_json::json!({}),
-            })
+            Ok(ChatResponse::from_text(
+                "{}".to_string(),
+                Default::default(),
+                serde_json::json!({}),
+            ))
         }
         fn provider_id(&self) -> &str {
             "mock"

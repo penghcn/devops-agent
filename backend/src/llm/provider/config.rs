@@ -1,17 +1,9 @@
 //! LLM Config Store — LLM 配置存储。
-//!
-//! 从 config.toml 加载 provider 配置。
-//! 配置不可运行时修改（只读），前端仅可查看脱敏后的配置。
 
 use std::sync::{Arc, Mutex, RwLock};
 
-use super::base::BaseConfig;
-use super::{
-    AnthropicProvider, DeepSeekProvider, LLaMAProvider, NVIDIAProvider, OpenAIProvider,
-    VLLMProvider,
-};
 use crate::llm::router::build_dummy_provider;
-use crate::llm::{LlmError, LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
+use crate::llm::{LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 
 /// 单-provider 配置
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -23,7 +15,7 @@ pub struct ProviderConfig {
     pub model_pro: Option<String>,
 }
 
-/// 当前 LLM 配置快照（用于读取）
+/// 当前 LLM 配置快照
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct LlmConfigSnapshot {
     pub providers: Vec<ProviderConfig>,
@@ -31,7 +23,6 @@ pub struct LlmConfigSnapshot {
 }
 
 impl LlmConfigSnapshot {
-    /// 返回配置快照，api_key 被脱敏
     pub fn with_masked_keys(&self) -> LlmConfigSnapshot {
         let mut snapshot = self.clone();
         for pc in &mut snapshot.providers {
@@ -40,12 +31,10 @@ impl LlmConfigSnapshot {
         snapshot
     }
 
-    /// 根据 provider id 查找配置
     pub fn get_provider(&self, id: &str) -> Option<&ProviderConfig> {
         self.providers.iter().find(|p| p.id == id)
     }
 
-    /// 获取默认 provider 的 model_flash
     pub fn default_model_flash(&self) -> Option<String> {
         self.get_provider(&self.default_provider)
             .and_then(|p| p.model_flash.clone())
@@ -55,7 +44,6 @@ impl LlmConfigSnapshot {
 /// 可运行时更新的 LLM 配置存储
 pub struct LlmConfigStore {
     inner: RwLock<LlmConfigSnapshot>,
-    /// 缓存的 ModelRouter，避免每请求重建（新建 reqwest::Client 丢失连接池）
     cached_router: Mutex<Option<Arc<dyn LlmProvider>>>,
 }
 
@@ -73,7 +61,6 @@ impl LlmConfigStore {
         Self::default()
     }
 
-    /// 从 ProviderConfig 列表初始化配置（同时失效 router 缓存）
     pub fn from_providers(providers: Vec<ProviderConfig>, default_provider: String) -> Self {
         Self {
             inner: RwLock::new(LlmConfigSnapshot {
@@ -84,13 +71,10 @@ impl LlmConfigStore {
         }
     }
 
-    /// 读取当前配置快照
     pub fn snapshot(&self) -> LlmConfigSnapshot {
         self.inner.read().unwrap().clone()
     }
 
-    /// 获取 ModelRouter。首次调用时构建并缓存，后续直接返回 Arc clone。
-    /// 配置变更后调用 invalidate_router_cache() 失效缓存。
     pub fn build_router(&self) -> Arc<dyn LlmProvider> {
         {
             let cache = self.cached_router.lock().unwrap();
@@ -107,24 +91,23 @@ impl LlmConfigStore {
         router
     }
 
-    /// 失效 router 缓存（配置变更后调用）
     pub fn invalidate_router_cache(&self) {
         let mut cache = self.cached_router.lock().unwrap();
         *cache = None;
     }
 }
 
-/// 共享的 ModelRouter 构建逻辑（config.rs 和 agent/mod.rs 共用）。
-/// 无有效配置时返回 dummy provider。
+/// 构建 ModelRouter — 目前使用 DummyProvider 占位。
+/// TODO: 接入 lellm-provider 的 CodecProvider。
 pub fn build_model_router(
     providers: &[ProviderConfig],
-    default_provider: &str,
+    _default_provider: &str,
 ) -> Arc<dyn LlmProvider> {
-    // 把 default_provider 排到最前面注册，确保优先路由
+    // Sort: default provider first
     let mut sorted = providers.to_vec();
     sorted.sort_by(|a, b| {
-        let a_is_default = a.id == default_provider;
-        let b_is_default = b.id == default_provider;
+        let a_is_default = a.id == _default_provider;
+        let b_is_default = b.id == _default_provider;
         b_is_default.cmp(&a_is_default)
     });
 
@@ -135,48 +118,32 @@ pub fn build_model_router(
         if key.is_empty() {
             continue;
         }
-
-        let base_url = pc.base_url.clone().ok_or_else(|| {
+        let Some(ref base_url) = pc.base_url else {
             tracing::warn!(
                 provider = %pc.id,
                 "Skipping provider: base_url is required but not configured"
             );
-        });
-        let base_url = match base_url {
-            Ok(url) => url,
-            Err(_) => continue,
+            continue;
         };
 
         let flash = pc.model_flash.clone();
 
-        let base_config = BaseConfig {
-            api_key: key.clone(),
-            base_url,
-            default_model: flash.clone().unwrap_or_default(),
-            timeout_secs: 60,
-        };
-
-        let result: Result<Arc<dyn LlmProvider>, LlmError> = match pc.id.as_str() {
-            "openai" => OpenAIProvider::new(base_config).map(|p| Arc::new(p) as _),
-            "anthropic" => AnthropicProvider::new(base_config).map(|p| Arc::new(p) as _),
-            "nvidia" => NVIDIAProvider::new(base_config).map(|p| Arc::new(p) as _),
-            "deepseek" => DeepSeekProvider::new(base_config).map(|p| Arc::new(p) as _),
-            "llama" => LLaMAProvider::new(base_config).map(|p| Arc::new(p) as _),
-            "vllm" => VLLMProvider::new(base_config).map(|p| Arc::new(p) as _),
+        // Create a LlmProvider adapter using lellm-provider's CodecProvider
+        let provider: Option<Arc<dyn LlmProvider>> = match pc.id.as_str() {
+            "openai" | "deepseek" | "nvidia" | "llama" | "vllm" => {
+                create_openai_compat_provider(key, base_url, flash.as_deref(), &pc.id)
+            }
+            "anthropic" => create_anthropic_provider(key, base_url, flash.as_deref()),
             _ => {
                 tracing::warn!(provider = %pc.id, "Unknown provider, skipping");
                 continue;
             }
         };
 
-        let provider = match result {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(
-                    provider = %pc.id,
-                    error = %e,
-                    "Failed to create provider"
-                );
+        let provider = match provider {
+            Some(p) => p,
+            None => {
+                tracing::warn!(provider = %pc.id, "Failed to create provider");
                 continue;
             }
         };
@@ -200,7 +167,82 @@ pub fn build_model_router(
     }
 }
 
-/// 脱敏 API Key: 显示前 4 位和后 4 位，中间用 **** 代替
+/// Create an OpenAI-compatible provider using lellm-provider's CodecProvider.
+fn create_openai_compat_provider(
+    api_key: &str,
+    base_url: &str,
+    _default_model: Option<&str>,
+    provider_id: &str,
+) -> Option<Arc<dyn LlmProvider>> {
+    use lellm_provider::providers::base::CodecProvider;
+    use lellm_provider::providers::openai_compat::OpenAICompatCodec;
+
+    let codec = OpenAICompatCodec {
+        provider_id: provider_id.to_string(),
+    };
+    let provider = CodecProvider::builder(codec)
+        .base_url(base_url)
+        .api_key(api_key)
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .ok()?;
+    Some(Arc::new(LlmProviderAdapter(provider)) as Arc<dyn LlmProvider>)
+}
+
+/// Create an Anthropic provider using lellm-provider's CodecProvider.
+fn create_anthropic_provider(
+    api_key: &str,
+    base_url: &str,
+    _default_model: Option<&str>,
+) -> Option<Arc<dyn LlmProvider>> {
+    use lellm_provider::providers::anthropic::AnthropicCodec;
+    use lellm_provider::providers::base::CodecProvider;
+
+    let codec = AnthropicCodec;
+    let provider = CodecProvider::builder(codec)
+        .base_url(base_url)
+        .api_key(api_key)
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .ok()?;
+    Some(Arc::new(LlmProviderAdapter(provider)) as Arc<dyn LlmProvider>)
+}
+
+/// Adapter: wraps lellm_provider::LlmProvider into our project's LlmProvider trait.
+struct LlmProviderAdapter<T: lellm_provider::LlmProvider>(T);
+
+#[async_trait::async_trait]
+impl<T: lellm_provider::LlmProvider + Send + Sync + 'static> crate::llm::LlmProvider
+    for LlmProviderAdapter<T>
+{
+    async fn llm_call(
+        &self,
+        request: &crate::llm::ChatRequest,
+    ) -> Result<crate::llm::ChatResponse, crate::llm::LlmError> {
+        // Convert our ChatRequest to lellm's ChatRequest
+        let lellm_request = convert_request(request);
+        self.0.call(&lellm_request).await
+    }
+
+    fn provider_id(&self) -> &str {
+        self.0.provider_id()
+    }
+}
+
+/// Convert project's ChatRequest to lellm's ChatRequest.
+fn convert_request(req: &crate::llm::ChatRequest) -> lellm_core::ChatRequest {
+    lellm_core::ChatRequest {
+        model: req.model.clone(),
+        messages: req.messages.clone(),
+        tools: req.tools.clone(),
+        temperature: req.temperature,
+        tool_choice: req.tool_choice.clone(),
+        stop_sequences: req.stop_sequences.clone(),
+        prefill: req.prefill.clone(),
+        ..Default::default()
+    }
+}
+
 fn mask_api_key(key: &str) -> String {
     if key.len() <= 8 {
         "****".to_string()

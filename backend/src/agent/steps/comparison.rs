@@ -181,7 +181,7 @@ fn result_to_string(result: &StepResult) -> String {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::llm::{ChatRequest, ChatResponse, LlmError, TokenUsage};
+    use crate::llm::{ChatRequest, ChatResponse, ChatResponseBuilder, LlmError, TokenUsage};
     use async_trait::async_trait;
     use std::sync::Arc;
 
@@ -190,12 +190,11 @@ mod tests {
     #[async_trait]
     impl LlmProvider for MockProvider {
         async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-            Ok(ChatResponse {
-                content: "mock response".to_string(),
-                tool_calls: vec![],
-                usage: TokenUsage::default(),
-                raw: serde_json::Value::Null,
-            })
+            Ok(ChatResponse::from_text(
+                "mock response".to_string(),
+                TokenUsage::default(),
+                serde_json::Value::Null,
+            ))
         }
         fn provider_id(&self) -> &str {
             "mock"

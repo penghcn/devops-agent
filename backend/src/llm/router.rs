@@ -1,10 +1,4 @@
 //! Model Router — L1/L2 task classification and provider routing.
-//!
-//! Routing flow:
-//! 1. Find Provider (by registration order)
-//! 2. Select model by task level: L1 → model_flash, L2 → model_pro
-//! 3. Fallback to default (model_flash) if flash/pro not configured
-//! 4. Error if default is also missing
 
 use std::sync::Arc;
 
@@ -33,8 +27,6 @@ pub struct ProviderModels {
 
 impl ProviderModels {
     /// Select model for a task level.
-    /// L1 → model_flash, L2 → model_pro. Falls back to default_model.
-    /// Returns error if nothing is configured.
     pub fn select(&self, level: TaskLevel) -> Result<String, LlmError> {
         let candidate = match level {
             TaskLevel::L1 => &self.model_flash,
@@ -44,8 +36,8 @@ impl ProviderModels {
         candidate
             .clone()
             .or_else(|| self.default_model.clone())
-            .ok_or_else(|| LlmError::NotFound {
-                model: format!("no model configured for {:?}", level),
+            .ok_or_else(|| LlmError::InvalidRequest {
+                message: format!("no model configured for {:?}", level),
             })
     }
 }
@@ -53,11 +45,8 @@ impl ProviderModels {
 /// Configuration for model routing.
 #[derive(Debug, Clone)]
 pub struct ModelRouterConfig {
-    /// Default task level when classification is uncertain (default: L1).
     pub default_level: TaskLevel,
-    /// Maximum tokens for L1 tasks (default: 1024).
     pub max_tokens_l1: u32,
-    /// Maximum tokens for L2 tasks (default: 4096).
     pub max_tokens_l2: u32,
 }
 
@@ -72,15 +61,16 @@ impl Default for ModelRouterConfig {
 }
 
 /// A dummy provider that always returns an error.
-/// Used as fallback when no LLM provider is configured.
 pub struct DummyProvider;
 
 #[async_trait::async_trait]
 impl LlmProvider for DummyProvider {
     async fn llm_call(&self, _request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        Err(LlmError::ApiError {
-            status: 503,
-            body: "No LLM provider configured".to_string(),
+        Err(LlmError::Provider {
+            provider: "dummy".to_string(),
+            status: Some(503),
+            code: None,
+            message: "No LLM provider configured".to_string(),
         })
     }
 
@@ -89,22 +79,18 @@ impl LlmProvider for DummyProvider {
     }
 }
 
-/// Build a dummy provider for fallback when no LLM provider is configured.
+/// Build a dummy provider for fallback.
 pub fn build_dummy_provider() -> Arc<dyn LlmProvider> {
     Arc::new(DummyProvider)
 }
 
 /// Routes LLM requests to the appropriate provider and model.
-///
-/// Consumers call `chat()` without knowing which provider or model handles the request.
 #[derive(Default)]
 pub struct ModelRouter {
-    /// Registered providers in order: (id, provider, models).
     providers: Vec<(String, Arc<dyn LlmProvider>, ProviderModels)>,
 }
 
 impl ModelRouter {
-    /// Create a new router. Configuration is reserved for future use.
     #[allow(dead_code)]
     pub fn new(_config: ModelRouterConfig) -> Self {
         Self {
@@ -112,12 +98,10 @@ impl ModelRouter {
         }
     }
 
-    /// Returns true if no providers are registered.
     pub fn is_empty(&self) -> bool {
         self.providers.is_empty()
     }
 
-    /// Register a provider with its model configuration.
     pub fn register_provider(
         &mut self,
         id: String,
@@ -127,20 +111,13 @@ impl ModelRouter {
         self.providers.push((id, provider, models));
     }
 
-    /// Classify a prompt into L1 (simple) or L2 (complex).
     pub fn classify_task(&self, prompt: &str) -> TaskLevel {
         if prompt.len() >= 500 {
             return TaskLevel::L2;
         }
 
         let complex_keywords = [
-            "分析",
-            "analyze",
-            "日志",
-            "log",
-            "debug",
-            "故障",
-            "root cause",
+            "分析", "analyze", "日志", "log", "debug", "故障", "root cause",
         ];
         if complex_keywords.iter().any(|kw| prompt.contains(kw)) {
             return TaskLevel::L2;
@@ -149,9 +126,6 @@ impl ModelRouter {
         TaskLevel::L1
     }
 
-    /// Find provider + resolve model for a task level.
-    /// Iterates providers in registration order, returns the first one
-    /// that has a model configured for the requested level.
     fn resolve(&self, level: TaskLevel) -> Result<(Arc<dyn LlmProvider>, String), LlmError> {
         for (_, provider, models) in &self.providers {
             if let Ok(model) = models.select(level) {
@@ -159,24 +133,29 @@ impl ModelRouter {
             }
         }
 
-        Err(LlmError::NotFound {
-            model: format!("no provider has a model for {:?}", level),
+        Err(LlmError::InvalidRequest {
+            message: format!("no provider has a model for {:?}", level),
         })
     }
 
-    /// Extract the user prompt from chat request messages.
     fn extract_prompt(messages: &[Message]) -> String {
         messages
             .iter()
             .filter_map(|m| match m {
-                Message::User { .. } => Some(m.extract_text()),
+                Message::User { .. } => {
+                    let text = m.content()
+                        .iter()
+                        .filter_map(|b| b.as_text().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if text.is_empty() { None } else { Some(text) }
+                }
                 _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n")
     }
 
-    /// Route a chat request: classify → resolve provider+model → call.
     pub async fn route(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
         let prompt = Self::extract_prompt(&request.messages);
         let level = self.classify_task(&prompt);
@@ -195,7 +174,6 @@ impl ModelRouter {
         provider.llm_call(&routed_request).await
     }
 
-    /// Find provider by model name — matches against registered models.
     fn find_provider_by_model(&self, model: &str) -> Option<Arc<dyn LlmProvider>> {
         for (_, provider, models) in &self.providers {
             let matched = models
@@ -214,7 +192,6 @@ impl ModelRouter {
                 return Some(provider.clone());
             }
         }
-        // Fallback to first provider.
         tracing::warn!(
             model = %model,
             "No provider found for model, falling back to first registered provider"
@@ -226,14 +203,12 @@ impl ModelRouter {
 #[async_trait::async_trait]
 impl LlmProvider for ModelRouter {
     async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
-        // Caller specified a model — route by prefix, fallback to first provider.
         if !request.model.is_empty()
             && let Some(provider) = self.find_provider_by_model(&request.model)
         {
             return provider.llm_call(request).await;
         }
 
-        // No model specified — classify task, resolve provider + model.
         self.route(request).await
     }
 

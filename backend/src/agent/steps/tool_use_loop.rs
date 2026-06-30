@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::agent::step::{Step, StepContext, StepResult};
 use crate::llm::tool_use_loop::{ToolExecutor, ToolUseLoop, ToolUseResult};
-use crate::llm::{PromptBuilder, SessionSlots, ToolDefinition};
+use crate::llm::{ChatResponseExt, PromptBuilder, SessionSlots, ToolDefinition};
 use crate::tools::builtin::{
     Tool, get_heavy_tool_definitions, register_all_builtin, register_heavy_tools,
 };
@@ -118,7 +118,7 @@ impl ToolUseLoopStep {
         }
 
         StepResult::Success {
-            message: result.response.content,
+            message: result.response.text_content(),
         }
     }
 }
