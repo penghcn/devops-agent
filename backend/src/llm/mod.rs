@@ -28,7 +28,7 @@ pub use structured_output::{StructuredOutput, StructuredOutputError};
 // ── Provider Trait (project-specific) ──
 
 /// 流式事件
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StreamEvent {
     /// 文本增量
     TextDelta(String),

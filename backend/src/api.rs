@@ -1,7 +1,7 @@
 use crate::agent::{AgentRequest, AgentResponse, StreamEvent};
 use crate::config::Config;
 use crate::db::DbPool;
-use crate::llm::LlmConfigStore;
+use crate::llm::{ChatRequest, ChatResponseExt, LlmConfigStore, Message, StreamEvent as LlmStreamEvent};
 use crate::sandbox::SandboxFactory;
 use crate::tools::jenkins_cache::{JenkinsCache, JenkinsCacheManager};
 use axum::{
@@ -42,6 +42,7 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
     let protected_routes = Router::new()
         .route("/api/agent", post(handle_agent))
         .route("/api/agent/stream", post(handle_agent_stream))
+        .route("/api/agent/stream_llm", post(handle_agent_stream_llm))
         .route("/api/cache", get(handle_cache))
         .route("/api/llm/config", get(handle_get_llm_config))
         .route("/api/knowledge/feedback", post(handle_knowledge_feedback))
@@ -152,6 +153,97 @@ async fn handle_agent_stream(
 
     let stream = ReceiverStream::new(sse_rx);
     Ok(Sse::new(stream))
+}
+
+/// SSE 流式 LLM 处理 — token 级别实时推送
+async fn handle_agent_stream_llm(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: Request<Body>,
+) -> Result<Sse<impl Stream<Item = Result<Event, axum::http::Error>>>, StatusCode> {
+    let body = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024)
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let req: AgentRequest = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let config = state.config.clone();
+    let llm_config_store = state.llm_config_store.clone();
+
+    // Internal channel: LLM Stream events
+    let (llm_event_tx, llm_event_rx) = tokio::sync::mpsc::channel::<LlmStreamEvent>(64);
+    // External channel: SSE Events
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Result<Event, axum::http::Error>>(64);
+
+    // Forwarder: convert LlmStreamEvent → SSE Event
+    tokio::spawn(async move {
+        let mut rx = llm_event_rx;
+        while let Some(event) = rx.recv().await {
+            let data = serde_json::to_string(&event).unwrap_or_default();
+            if sse_tx.send(Ok(Event::default().data(data))).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let tx_clone = llm_event_tx.clone();
+    tokio::spawn(async move {
+        let response = process_request_stream_llm(req, &config, &llm_config_store, tx_clone).await;
+
+        // Send completion event
+        let _ = llm_event_tx
+            .send(LlmStreamEvent::Done)
+            .await;
+
+        tracing::info!("LLM streaming completed: {}", response);
+    });
+
+    let stream = ReceiverStream::new(sse_rx);
+    Ok(Sse::new(stream))
+}
+
+/// 处理 LLM 流式请求
+async fn process_request_stream_llm(
+    req: AgentRequest,
+    config: &Config,
+    store: &LlmConfigStore,
+    sender: tokio::sync::mpsc::Sender<LlmStreamEvent>,
+) -> String {
+    use crate::llm::tool_use_loop::{ToolExecutor, ToolUseLoop};
+    use crate::tools::builtin::{register_all_builtin, register_heavy_tools};
+
+    let llm_provider = store.build_router();
+    let default_model = store
+        .snapshot()
+        .default_model_flash()
+        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+
+    // Build tool executor
+    let mut executor = ToolExecutor::new();
+    register_all_builtin(&mut executor, config);
+    register_heavy_tools(&mut executor);
+
+    // Build request
+    let request = ChatRequest {
+        model: default_model,
+        messages: vec![Message::user_text(&req.prompt)],
+        ..Default::default()
+    };
+
+    // Execute with streaming
+    let mut tool_loop = ToolUseLoop::new(llm_provider, executor, request);
+    tool_loop.set_max_iterations(10);
+
+    let event_tx = Arc::new(sender);
+    match tool_loop.execute_streaming(event_tx.clone()).await {
+        Ok(result) => {
+            let text = result.response.text_content();
+            tracing::info!("LLM streaming result: {}", &text[..text.len().min(100)]);
+            text
+        }
+        Err(e) => {
+            tracing::error!("LLM streaming error: {}", e);
+            format!("Error: {}", e)
+        }
+    }
 }
 
 async fn process_request_stream(
