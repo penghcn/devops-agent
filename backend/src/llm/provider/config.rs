@@ -97,8 +97,7 @@ impl LlmConfigStore {
     }
 }
 
-/// 构建 ModelRouter — 目前使用 DummyProvider 占位。
-/// TODO: 接入 lellm-provider 的 CodecProvider。
+/// 构建 ModelRouter — 使用 lellm-provider 的 CodecProvider 创建 provider。
 pub fn build_model_router(
     providers: &[ProviderConfig],
     _default_provider: &str,
