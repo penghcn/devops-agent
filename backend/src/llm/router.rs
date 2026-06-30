@@ -74,6 +74,15 @@ impl LlmProvider for DummyProvider {
         })
     }
 
+    async fn stream(&self, _request: &ChatRequest) -> Result<super::ProviderStream, LlmError> {
+        Err(LlmError::Provider {
+            provider: "dummy".to_string(),
+            status: Some(503),
+            code: None,
+            message: "No LLM provider configured".to_string(),
+        })
+    }
+
     fn provider_id(&self) -> &str {
         "dummy"
     }
@@ -210,6 +219,24 @@ impl LlmProvider for ModelRouter {
         }
 
         self.route(request).await
+    }
+
+    async fn stream(&self, request: &ChatRequest) -> Result<super::ProviderStream, LlmError> {
+        if !request.model.is_empty()
+            && let Some(provider) = self.find_provider_by_model(&request.model)
+        {
+            return provider.stream(request).await;
+        }
+
+        // Fallback: route and stream
+        let prompt = Self::extract_prompt(&request.messages);
+        let level = self.classify_task(&prompt);
+        let (provider, model) = self.resolve(level)?;
+
+        let mut routed_request = request.clone();
+        routed_request.model = model;
+
+        provider.stream(&routed_request).await
     }
 
     fn provider_id(&self) -> &str {

@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
+use futures::StreamExt;
 use crate::llm::router::build_dummy_provider;
 use crate::llm::{LlmProvider, ModelRouter, ModelRouterConfig, ProviderModels};
 
@@ -218,9 +219,36 @@ impl<T: lellm_provider::LlmProvider + Send + Sync + 'static> crate::llm::LlmProv
         &self,
         request: &crate::llm::ChatRequest,
     ) -> Result<crate::llm::ChatResponse, crate::llm::LlmError> {
-        // Convert our ChatRequest to lellm's ChatRequest
         let lellm_request = convert_request(request);
         self.0.call(&lellm_request).await
+    }
+
+    async fn stream(
+        &self,
+        request: &crate::llm::ChatRequest,
+    ) -> Result<crate::llm::ProviderStream, crate::llm::LlmError> {
+        let lellm_request = convert_request(request);
+        let lellm_stream = self.0.stream(&lellm_request).await?;
+
+        // Convert lellm ProviderEvent stream to our StreamEvent stream
+        let mapped = lellm_stream.map(|event| {
+            event.map(|e| match e {
+                lellm_provider::ProviderEvent::Start { .. } => crate::llm::StreamEvent::TextDelta(String::new()),
+                lellm_provider::ProviderEvent::Token { token } => crate::llm::StreamEvent::TextDelta(token),
+                lellm_provider::ProviderEvent::ThinkingDelta { thinking, redacted } => {
+                    crate::llm::StreamEvent::ThinkingDelta { thinking, redacted }
+                }
+                lellm_provider::ProviderEvent::ResponseComplete { tool_calls: _, usage } => {
+                    if let Some(usage) = usage {
+                        crate::llm::StreamEvent::Usage(usage)
+                    } else {
+                        crate::llm::StreamEvent::Done
+                    }
+                }
+            })
+        });
+
+        Ok(Box::pin(mapped))
     }
 
     fn provider_id(&self) -> &str {

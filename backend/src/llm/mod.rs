@@ -27,11 +27,39 @@ pub use structured_output::{StructuredOutput, StructuredOutputError};
 
 // ── Provider Trait (project-specific) ──
 
+/// 流式事件
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// 文本增量
+    TextDelta(String),
+    /// 思考增量
+    ThinkingDelta { thinking: String, redacted: Option<String> },
+    /// 工具调用增量
+    ToolCallDelta {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_delta: Option<String>,
+    },
+    /// Token 使用量
+    Usage(TokenUsage),
+    /// 流结束
+    Done,
+}
+
+/// 流式响应类型
+pub type ProviderStream = std::pin::Pin<
+    Box<dyn futures::Stream<Item = Result<StreamEvent, LlmError>> + Send>,
+>;
+
 /// Unified interface for all LLM providers.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Send a chat completion request and return the response.
     async fn llm_call(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError>;
+
+    /// Send a streaming request and return a stream of events.
+    async fn stream(&self, request: &ChatRequest) -> Result<ProviderStream, LlmError>;
 
     /// Return a stable identifier for this provider (e.g. "openai", "anthropic").
     fn provider_id(&self) -> &str;

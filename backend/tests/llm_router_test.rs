@@ -38,6 +38,12 @@ impl LlmProvider for TestProvider {
         ))
     }
 
+    async fn stream(&self, _request: &ChatRequest) -> Result<devops_agent::llm::ProviderStream, LlmError> {
+        Err(LlmError::UnsupportedFeature {
+            feature: "streaming not supported in test".to_string(),
+        })
+    }
+
     fn provider_id(&self) -> &str {
         &self.id
     }
@@ -443,6 +449,12 @@ async fn test_structured_output_retry_on_failure() {
             ))
         }
 
+        async fn stream(&self, _request: &ChatRequest) -> Result<devops_agent::llm::ProviderStream, LlmError> {
+            Err(LlmError::UnsupportedFeature {
+                feature: "streaming not supported in test".to_string(),
+            })
+        }
+
         fn provider_id(&self) -> &str {
             &self.id
         }
@@ -529,6 +541,12 @@ impl LlmProvider for CapturingToolProvider {
             TokenUsage::default(),
             serde_json::json!({}),
         ))
+    }
+
+    async fn stream(&self, _request: &ChatRequest) -> Result<devops_agent::llm::ProviderStream, LlmError> {
+        Err(LlmError::UnsupportedFeature {
+            feature: "streaming not supported in test".to_string(),
+        })
     }
 
     fn provider_id(&self) -> &str {
@@ -677,6 +695,12 @@ impl LlmProvider for CapturingEnhancedProvider {
             TokenUsage::default(),
             serde_json::json!({}),
         ))
+    }
+
+    async fn stream(&self, _request: &ChatRequest) -> Result<devops_agent::llm::ProviderStream, LlmError> {
+        Err(LlmError::UnsupportedFeature {
+            feature: "streaming not supported in test".to_string(),
+        })
     }
 
     fn provider_id(&self) -> &str {

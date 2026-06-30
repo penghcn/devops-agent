@@ -264,6 +264,12 @@ impl LlmProvider for MockProvider {
         ))
     }
 
+    async fn stream(&self, _request: &ChatRequest) -> Result<devops_agent::llm::ProviderStream, LlmError> {
+        Err(LlmError::UnsupportedFeature {
+            feature: "streaming not supported in mock".to_string(),
+        })
+    }
+
     fn provider_id(&self) -> &str {
         "mock"
     }

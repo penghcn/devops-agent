@@ -196,6 +196,11 @@ mod tests {
                 serde_json::Value::Null,
             ))
         }
+        async fn stream(&self, _request: &ChatRequest) -> Result<crate::llm::ProviderStream, LlmError> {
+            Err(LlmError::UnsupportedFeature {
+                feature: "streaming not supported in mock".to_string(),
+            })
+        }
         fn provider_id(&self) -> &str {
             "mock"
         }

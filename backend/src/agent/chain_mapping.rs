@@ -72,6 +72,15 @@ mod tests {
             })
         }
 
+        async fn stream(&self, _request: &ChatRequest) -> Result<crate::llm::ProviderStream, LlmError> {
+            Err(LlmError::Provider {
+                provider: "mock".to_string(),
+                status: Some(500),
+                code: None,
+                message: "mock provider - not for real calls".to_string(),
+            })
+        }
+
         fn provider_id(&self) -> &str {
             "mock"
         }

@@ -610,6 +610,11 @@ mod tests {
                 serde_json::json!({}),
             ))
         }
+        async fn stream(&self, _request: &ChatRequest) -> Result<super::super::ProviderStream, LlmError> {
+            Err(LlmError::UnsupportedFeature {
+                feature: "streaming not supported in mock".to_string(),
+            })
+        }
         fn provider_id(&self) -> &str {
             "mock"
         }
